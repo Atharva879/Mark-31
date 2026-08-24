@@ -25,6 +25,18 @@ The repository currently contains the first vertical slice:
 | Discord/WhatsApp/screen/scheduler integrations | Planned for later milestones |
 | SimilarWeb analytics adapter | Planned for Milestone 10; credential/API boundary must be confirmed |
 
+## Desktop interface
+
+Running `python main.py` now opens the Jarvis desktop command center by default. The interface follows the supplied reference direction: a dark HUD-style three-panel layout with cyan accents, left-side system telemetry, a central animated circular visualizer, and a right-side interaction console. The UI presents `LISTENING`, `THINKING`, and `SPEAKING` states, includes an `INTERRUPT` control, and exposes diagnostics and permission status without requiring a terminal.
+
+Use the `API CONFIG` button in the top-right panel to paste Gemini and OpenRouter keys directly into the application. The fields are masked by default, can be revealed temporarily, and save locally to `.env`; key values are not placed into chat history or audit records. `SAVE + APPLY` rebuilds the provider runtime without requiring a restart. The `PROVIDER ORDER` field controls failover order.
+
+The terminal mode remains available for diagnostics and automation-friendly use:
+
+```powershell
+python main.py --cli
+```
+
 ## Local setup
 
 Use Python 3.11 or newer on the Windows computer that will eventually control desktop applications. Create and activate a virtual environment, install the base package and development extras, then copy `.env.example` to `.env` and add provider credentials locally.
@@ -57,7 +69,7 @@ The default CLI writes audit events to `logs/audit.jsonl` and stores explicit me
 python main.py
 ```
 
-Type `tools` to list the registered tools, `diagnostics` to inspect the local runtime, a normal command to exercise the provider/tool loop, and `exit` to quit. If the primary provider fails, the router retries according to configuration and then attempts the fallback provider with the same request. If no credentials are configured, the CLI reports a provider error rather than silently doing something else.
+Type a command in the right-side console to exercise the provider/tool loop. The terminal-only mode supports `tools`, `diagnostics`, normal commands, and `exit` through `python main.py --cli`. If the primary provider fails, the router retries according to configuration and then attempts the fallback provider with the same request. If no credentials are configured, the CLI reports a provider error rather than silently doing something else.
 
 ## Safety model
 

@@ -269,3 +269,9 @@ The user has not specified a preferred UI beyond the supplied CLI-oriented brief
 ## Definition of Done for the First Approved Build
 
 The first approved build is complete when the repository contains a documented, tested Milestone 1 implementation with dual-provider routing, fallback behavior, strict structured tool validation, a dispatcher skeleton with risk tiers, confirmation hooks, audit logging, safe mock tools, `.env.example`, and no arbitrary command execution. The remaining milestones will be tracked as subsequent increments rather than being implemented all at once.
+
+## UI Amendment — Desktop Command Center
+
+The first executable experience is now a proper Python desktop application rather than a terminal-only program. `ui.py` uses Tkinter and Canvas to provide a dark three-panel HUD layout with telemetry and permission status on the left, an animated central visualizer, and a right-side interaction console. The UI exposes `LISTENING`, `THINKING`, and `SPEAKING` states, an interrupt control, diagnostics, and activity logs.
+
+The top-right `API CONFIG` panel accepts masked Gemini and OpenRouter API keys, supports temporary reveal, allows provider-order editing, and applies configuration without restarting. The values are stored locally in `.env` and deliberately excluded from chat and audit records. Windows Credential Manager integration remains a future hardening step for stronger at-rest secret protection.

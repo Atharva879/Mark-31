@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import os
@@ -282,5 +283,16 @@ def run_cli() -> None:
             print(f"Jarvis error> {type(exc).__name__}: {exc}")
 
 
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Launch the Jarvis local assistant")
+    parser.add_argument("--cli", action="store_true", help="Use the terminal interface instead of the desktop UI")
+    args = parser.parse_args()
+    if args.cli:
+        run_cli()
+    else:
+        from ui import run_app
+        run_app()
+
+
 if __name__ == "__main__":
-    run_cli()
+    main()

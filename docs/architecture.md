@@ -33,6 +33,12 @@ AuditLogger + tool result
 Bounded follow-up loop -> final response
 ```
 
+## Desktop UI
+
+`ui.py` provides the default Python desktop application using Tkinter and Canvas, which keeps the first UI release dependency-light and Windows-friendly. Its three-panel composition follows the supplied reference: telemetry and permissions on the left, a central animated HUD, and the interaction console on the right. The visual state machine is `LISTENING -> THINKING -> SPEAKING -> LISTENING`; the interrupt control changes the visible state and records that active network calls cannot be cancelled retroactively.
+
+The API configuration window contains masked Gemini and OpenRouter fields, a temporary reveal toggle, provider order, and `SAVE + APPLY`. Values are written only to the local `.env` file and applied to the in-memory settings. They are never inserted into chat messages or audit fields. A future release should replace or supplement `.env` persistence with the Windows Credential Manager for stronger at-rest secret handling.
+
 ## Current implemented slice
 
 The current branch includes a SQLite memory store, a scoped filesystem adapter, and an allowlisted application controller in addition to the original LLM router and dispatcher. Memory operations are explicit: notes and facts are written only through registered tools, recall is bounded, and forgetting a memory is sensitive. File operations require configured roots, enforce size limits, reject binary reads, and expose deletion only as a Recycle Bin move. Application control accepts configured executable paths only and fails closed on non-Windows hosts.
