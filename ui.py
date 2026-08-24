@@ -19,6 +19,7 @@ from tkinter.scrolledtext import ScrolledText
 from config import Settings
 from main import build_runtime
 from skills.screen import ScreenCapture
+from skills.voice import SpeechSynthesizer, VoiceInput
 from ui_config import write_local_env
 
 try:
@@ -57,6 +58,12 @@ class JarvisApp(tk.Tk):
         self.settings = Settings.from_env()
         self.router, self.dispatcher, self.registry = build_runtime(self.settings)
         self.screen = ScreenCapture(timeout_seconds=float(os.environ.get("JARVIS_SCREEN_TIMEOUT_SECONDS", "60")))
+        self.voice_input = VoiceInput(
+            model_size=os.environ.get("JARVIS_WHISPER_MODEL", "base"),
+            max_seconds=float(os.environ.get("JARVIS_VOICE_MAX_SECONDS", "10")),
+        )
+        self.tts = SpeechSynthesizer(rate=int(os.environ.get("JARVIS_TTS_RATE", "175")))
+        self.voice_request_active = False
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.ui_state = "LISTENING"
         self._animation_tick = 0
@@ -202,6 +209,8 @@ class JarvisApp(tk.Tk):
         self.screen_button.pack(side="left", padx=5)
         self.chat_mode_button = ttk.Button(controls, text="ENABLE CHAT MODE", style="Jarvis.TButton", command=self._toggle_chat_mode)
         self.chat_mode_button.pack(side="left", padx=5)
+        self.voice_button = ttk.Button(controls, text="START VOICE", style="Jarvis.TButton", command=self._start_voice)
+        self.voice_button.pack(side="left", padx=5)
         ttk.Button(controls, text="INTERRUPT", style="Jarvis.TButton", command=self._interrupt).pack(side="left", padx=5)
 
     def _draw_hud(self) -> None:
@@ -310,9 +319,23 @@ class JarvisApp(tk.Tk):
                 kind, payload = self.events.get_nowait()
                 if kind == "response":
                     self._write_log("JARVIS", str(payload), COLORS["green"])
-                    self._set_state("SPEAKING", "RESPONSE READY")
-                    self.after(1300, lambda: self._set_state("LISTENING", "READY FOR COMMAND"))
+                    if self.voice_request_active:
+                        self._set_state("SPEAKING", "VOICE RESPONSE")
+                        self.tts.speak_async(str(payload), on_done=lambda: self.events.put(("speech_done", "")))
+                    else:
+                        self._set_state("SPEAKING", "RESPONSE READY")
+                        self.after(1300, lambda: self._set_state("LISTENING", "READY FOR COMMAND"))
+                elif kind == "voice_transcript":
+                    self._write_log("VOICE", str(payload), COLORS["cyan"])
+                elif kind == "voice_thinking":
+                    self._set_state("THINKING", "ROUTING VOICE COMMAND")
+                elif kind == "speech_done":
+                    self.voice_request_active = False
+                    self.voice_button.configure(state="normal", text="START VOICE")
+                    self._set_state("LISTENING", "READY FOR COMMAND")
                 else:
+                    self.voice_request_active = False
+                    self.voice_button.configure(state="normal", text="START VOICE")
                     self._write_log("ERROR", str(payload), COLORS["red"])
                     self._set_state("LISTENING", "REQUEST FAILED")
         except queue.Empty:
@@ -376,9 +399,32 @@ class JarvisApp(tk.Tk):
             self.chat_window.destroy()
         self.chat_window = None
 
+    def _start_voice(self) -> None:
+        if self.voice_request_active:
+            return
+        self.voice_request_active = True
+        self.voice_button.configure(state="disabled", text="LISTENING...")
+        self._set_state("LISTENING", "MICROPHONE ACTIVE")
+        self._write_log("SYSTEM", "Push-to-talk capture started. Audio stays local for transcription.", COLORS["orange"])
+        threading.Thread(target=self._listen_and_run, daemon=True).start()
+
+    def _listen_and_run(self) -> None:
+        try:
+            text = self.voice_input.listen_once()
+            if not text:
+                raise RuntimeError("No speech was detected")
+            self.events.put(("voice_transcript", text))
+            self.events.put(("voice_thinking", ""))
+            self._run_command(text)
+        except Exception as exc:
+            self.events.put(("error", f"{type(exc).__name__}: {exc}"))
+
     def _interrupt(self) -> None:
+        self.tts.stop()
+        self.voice_request_active = False
+        self.voice_button.configure(state="normal", text="START VOICE")
         self._set_state("LISTENING", "INTERRUPT REQUESTED")
-        self._write_log("SYSTEM", "Interrupt requested. Active provider calls cannot be cancelled retroactively.", COLORS["orange"])
+        self._write_log("SYSTEM", "Interrupt requested. Speech output stopped; active network calls cannot be cancelled retroactively.", COLORS["orange"])
 
     def _refresh_telemetry(self) -> None:
         if psutil is None:
