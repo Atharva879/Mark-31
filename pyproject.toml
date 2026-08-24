@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jarvis-agent"
+version = "0.1.0"
+description = "A safety-first local Windows AI automation agent"
+requires-python = ">=3.11"
+dependencies = [
+  "requests>=2.31,<3",
+  "python-dotenv>=1.0,<2",
+]
+
+[project.optional-dependencies]
+providers = [
+  "google-genai>=1.0,<2",
+]
+windows = [
+  "pyautogui>=0.9,<1",
+  "pywin32>=306,<310",
+  "pywinauto>=0.6,<1",
+  "mss>=9,<11",
+  "psutil>=5.9,<8",
+  "send2trash>=1.8,<2",
+]
+voice = [
+  "faster-whisper>=1.0,<2",
+  "pyttsx3>=2.90,<3",
+]
+dev = [
+  "pytest>=8,<9",
+  "ruff>=0.6,<1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.setuptools]
+py-modules = ["audit", "config", "dispatcher", "main", "safety", "ui", "ui_config"]
+packages = ["llm", "skills", "memory"]
