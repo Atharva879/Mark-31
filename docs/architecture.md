@@ -47,6 +47,8 @@ WhatsApp Desktop is an optional UI Automation adapter. It is disabled by default
 
 The repository’s first feature branch has now been merged into `main`. Future milestones should branch from the latest `origin/main` so the default GitHub view remains current.
 
+Screen awareness is opt-in and separate from the normal tool loop. The UI must show `SCREEN ACTIVE` while capture is enabled, and `ScreenCapture` automatically expires the session after the configured timeout. A `/screen <question>` command captures one PNG in memory and sends it to the Gemini vision adapter; it does not write the image to disk or pass it through an unrelated provider. The capture backend rejects calls while disabled and caps payload size before encoding.
+
 ## Current implemented slice
 
 The current branch includes a SQLite memory store, a scoped filesystem adapter, and an allowlisted application controller in addition to the original LLM router and dispatcher. Memory operations are explicit: notes and facts are written only through registered tools, recall is bounded, and forgetting a memory is sensitive. File operations require configured roots, enforce size limits, reject binary reads, and expose deletion only as a Recycle Bin move. Application control accepts configured executable paths only and fails closed on non-Windows hosts.
