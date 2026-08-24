@@ -18,7 +18,11 @@ The repository currently contains the first vertical slice:
 | Risk tiers and sensitive confirmation hook | Implemented |
 | Append-only JSONL audit log | Implemented with secret-like value redaction |
 | Side-effect-free mock tools | Implemented |
-| Windows desktop integrations | Planned for later milestones |
+| Persistent SQLite memory | Implemented with explicit remember, recall, and forget operations |
+| Scoped file operations | Implemented with root enforcement, size limits, and Recycle Bin-only deletion |
+| Windows application controls | Implemented as an allowlisted adapter; fails closed outside Windows |
+| CLI diagnostics | Implemented |
+| Discord/WhatsApp/screen/scheduler integrations | Planned for later milestones |
 | SimilarWeb analytics adapter | Planned for Milestone 10; credential/API boundary must be confirmed |
 
 ## Local setup
@@ -33,7 +37,7 @@ python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
 ```
 
-The first milestone does not require Windows-only dependencies because all registered tools are harmless mock tools. Install the Windows extras only when those integrations are being implemented:
+The current build includes persistent memory and registers file tools when `JARVIS_ALLOWED_ROOTS` is configured. Application tools are always present but require an allowlist and a Windows host; they fail closed on other operating systems. The first milestone does not require Windows-only dependencies because the application adapter is not executable on the sandbox and file tools remain disabled until roots are configured. Install the Windows extras only when those integrations are being implemented:
 
 ```powershell
 python -m pip install -e ".[providers,windows]"
@@ -45,7 +49,7 @@ Real `.env` files, audit logs, memory databases, virtual environments, and cache
 
 `GEMINI_API_KEY` is used by the primary adapter, and `OPENROUTER_API_KEY` is used by the fallback adapter. `JARVIS_PROVIDER_ORDER` controls the order, defaulting to `gemini,openrouter`. Model names are configurable because free-tier availability can change. Runtime limits protect against large inputs and runaway tool loops.
 
-The default CLI writes audit events to `logs/audit.jsonl`. It does not permanently delete files, send messages, submit forms, install software, or control desktop applications in Milestone 1.
+The default CLI writes audit events to `logs/audit.jsonl` and stores explicit memories in `memory/memory.db`. File tools are disabled unless allowed roots are configured. It never permanently deletes files: the sensitive delete operation only moves a file to the operating system Recycle Bin. Application control accepts only configured allowlisted applications and is unavailable outside Windows.
 
 ## Run
 
@@ -53,7 +57,7 @@ The default CLI writes audit events to `logs/audit.jsonl`. It does not permanent
 python main.py
 ```
 
-Type `tools` to list the registered mock tools. Type a normal command to exercise the provider/tool loop, and type `exit` to quit. If the primary provider fails, the router retries according to configuration and then attempts the fallback provider with the same request. If no credentials are configured, the CLI reports a provider error rather than silently doing something else.
+Type `tools` to list the registered tools, `diagnostics` to inspect the local runtime, a normal command to exercise the provider/tool loop, and `exit` to quit. If the primary provider fails, the router retries according to configuration and then attempts the fallback provider with the same request. If no credentials are configured, the CLI reports a provider error rather than silently doing something else.
 
 ## Safety model
 

@@ -33,6 +33,10 @@ AuditLogger + tool result
 Bounded follow-up loop -> final response
 ```
 
+## Current implemented slice
+
+The current branch includes a SQLite memory store, a scoped filesystem adapter, and an allowlisted application controller in addition to the original LLM router and dispatcher. Memory operations are explicit: notes and facts are written only through registered tools, recall is bounded, and forgetting a memory is sensitive. File operations require configured roots, enforce size limits, reject binary reads, and expose deletion only as a Recycle Bin move. Application control accepts configured executable paths only and fails closed on non-Windows hosts.
+
 ## Provider isolation
 
 `llm/gemini_client.py` and `llm/openrouter_client.py` translate provider-specific HTTP payloads into the common `LLMResponse` model. `llm/router.py` does not inspect provider-specific response details. It tries providers in configured order and records route events for both successful and failed attempts.
@@ -53,7 +57,7 @@ Handlers must be small adapters around deterministic operations. A future handle
 | `MODERATE` | Automatic with visibility | Notify the user, execute, audit destination and payload metadata |
 | `SENSITIVE` | Explicit confirmation | Show exact target and consequence, wait for confirmation, execute only when approved, audit the decision |
 
-The confirmation callback is intentionally injected into the dispatcher. This keeps the policy testable and allows the CLI, a future tray application, or another UI to provide the confirmation surface without altering the execution rules.
+The confirmation callback is intentionally injected into the dispatcher. This keeps the policy testable and allows the CLI, a future tray application, or another UI to provide the confirmation surface without altering the execution rules. The current CLI uses a conservative default that denies sensitive actions until an interactive confirmation surface is wired in.
 
 ## Audit records
 
