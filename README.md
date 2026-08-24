@@ -22,14 +22,15 @@ The repository currently contains the first vertical slice:
 | Scoped file operations | Implemented with root enforcement, size limits, and Recycle Bin-only deletion |
 | Windows application controls | Implemented as an allowlisted adapter; fails closed outside Windows |
 | CLI diagnostics | Implemented |
-| Discord/WhatsApp/screen/scheduler integrations | Planned for later milestones |
+| Discord messaging | Implemented as an optional allowlisted moderate-risk tool |
+| WhatsApp/screen/scheduler integrations | Planned for later milestones |
 | SimilarWeb analytics adapter | Planned for Milestone 10; credential/API boundary must be confirmed |
 
 ## Desktop interface
 
-Running `python main.py` now opens the Jarvis desktop command center by default. The interface follows the supplied reference direction: a dark HUD-style three-panel layout with cyan accents, left-side system telemetry, a central animated circular visualizer, and a right-side interaction console. The UI presents `LISTENING`, `THINKING`, and `SPEAKING` states, includes an `INTERRUPT` control, and exposes diagnostics and permission status without requiring a terminal.
+Running `python main.py` now opens the Jarvis desktop command center by default. The interface follows the supplied reference direction while keeping rendering clean: a dark HUD-style three-panel layout with restrained cyan accents, left-side system telemetry, a central animated circular visualizer, and a right-side activity feed. The UI presents `LISTENING`, `THINKING`, and `SPEAKING` states, includes an `INTERRUPT` control, uses readable Segoe UI/Cascadia Mono typography, and exposes diagnostics and permission status without requiring a terminal. Direct chat is no longer permanently embedded in the main window.
 
-Use the `API CONFIG` button in the top-right panel to paste Gemini and OpenRouter keys directly into the application. The fields are masked by default, can be revealed temporarily, and save locally to `.env`; key values are not placed into chat history or audit records. `SAVE + APPLY` rebuilds the provider runtime without requiring a restart. The `PROVIDER ORDER` field controls failover order.
+Use the `API CONFIG` button in the top-right panel to paste Gemini and OpenRouter keys directly into the application. The fields are masked by default, can be revealed temporarily, and save locally to `.env`; key values are not placed into chat history or audit records. `SAVE + APPLY` rebuilds the provider runtime without requiring a restart. The `PROVIDER ORDER` field controls failover order. Use `ENABLE CHAT MODE` beneath the HUD to open a separate chat window; `DISABLE CHAT MODE` closes it and returns the main window to activity-only mode.
 
 The terminal mode remains available for diagnostics and automation-friendly use:
 

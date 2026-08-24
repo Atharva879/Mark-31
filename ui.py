@@ -47,7 +47,10 @@ class JarvisApp(tk.Tk):
         self.geometry("1450x860")
         self.minsize(1120, 700)
         self.configure(bg=COLORS["bg"])
+        self.tk.call("tk", "scaling", 1.25)
         self.protocol("WM_DELETE_WINDOW", self._close)
+        self.chat_mode = False
+        self.chat_window: tk.Toplevel | None = None
 
         self.settings = Settings.from_env()
         self.router, self.dispatcher, self.registry = build_runtime(self.settings)
@@ -103,21 +106,21 @@ class JarvisApp(tk.Tk):
             text="JARVIS",
             bg=COLORS["bg"],
             fg=COLORS["cyan"],
-            font=("Segoe UI", 25, "bold"),
+            font=("Segoe UI", 26, "bold"),
         ).grid(row=0, column=0, sticky="w")
         tk.Label(
             header,
             text="LOCAL COMMAND CENTER  //  PERSONAL AI AUTOMATION",
             bg=COLORS["bg"],
             fg=COLORS["muted"],
-            font=("Consolas", 9),
+            font=("Cascadia Mono", 9),
         ).grid(row=1, column=0, sticky="w")
         self.connection_label = tk.Label(
             header,
             text="●  CORE ONLINE",
             bg=COLORS["bg"],
             fg=COLORS["green"],
-            font=("Consolas", 10, "bold"),
+            font=("Cascadia Mono", 10, "bold"),
         )
         self.connection_label.grid(row=0, column=1, rowspan=2, sticky="e", padx=(0, 18))
         ttk.Button(header, text="API CONFIG", style="Jarvis.TButton", command=self._open_api_config).grid(
@@ -131,7 +134,7 @@ class JarvisApp(tk.Tk):
             text=title,
             bg=COLORS["panel"],
             fg=COLORS["cyan"],
-            font=("Consolas", 10, "bold"),
+            font=("Cascadia Mono", 10, "bold"),
             anchor="w",
         ).pack(fill="x", padx=16, pady=(14, 12))
         return frame
@@ -194,6 +197,8 @@ class JarvisApp(tk.Tk):
         controls = tk.Frame(panel, bg=COLORS["bg"])
         controls.grid(row=3, column=0, pady=(0, 18))
         ttk.Button(controls, text="INITIALIZE", style="Jarvis.TButton", command=self._focus_input).pack(side="left", padx=5)
+        self.chat_mode_button = ttk.Button(controls, text="ENABLE CHAT MODE", style="Jarvis.TButton", command=self._toggle_chat_mode)
+        self.chat_mode_button.pack(side="left", padx=5)
         ttk.Button(controls, text="INTERRUPT", style="Jarvis.TButton", command=self._interrupt).pack(side="left", padx=5)
 
     def _draw_hud(self) -> None:
@@ -231,23 +236,18 @@ class JarvisApp(tk.Tk):
             self.hud.create_line(x, base_y, x, base_y - bar, fill=accent if index % 3 else COLORS["cyan_dim"], width=2)
 
     def _build_right_console(self) -> None:
-        panel = self._panel(self, "INTERACTION CONSOLE")
+        panel = self._panel(self, "ACTIVITY FEED")
         panel.grid(row=1, column=2, sticky="nsew", padx=(10, 26), pady=8)
         panel.configure(width=360)
         panel.pack_propagate(False)
-        self.chat = ScrolledText(panel, wrap="word", height=20, bg="#07111d", fg=COLORS["text"], insertbackground=COLORS["cyan"], relief="flat", borderwidth=0, font=("Consolas", 9), padx=12, pady=10)
-        self.chat.pack(fill="both", expand=True, padx=12, pady=(0, 12))
-        self.chat.configure(state="disabled")
-        self.chat.tag_configure("system", foreground=COLORS["muted"])
-        self.chat.tag_configure("user", foreground=COLORS["cyan"])
-        self.chat.tag_configure("jarvis", foreground=COLORS["green"])
-        self.chat.tag_configure("error", foreground=COLORS["red"])
-        compose = tk.Frame(panel, bg=COLORS["panel"])
-        compose.pack(fill="x", padx=12, pady=(0, 14))
-        self.input = tk.Entry(compose, bg="#0d2030", fg=COLORS["text"], insertbackground=COLORS["cyan"], relief="flat", font=("Segoe UI", 10))
-        self.input.pack(side="left", fill="x", expand=True, ipady=9)
-        self.input.bind("<Return>", lambda _event: self._send())
-        ttk.Button(compose, text="SEND", style="Jarvis.TButton", command=self._send).pack(side="right", padx=(8, 0))
+        self.activity = ScrolledText(panel, wrap="word", height=20, bg="#07111d", fg=COLORS["text"], relief="flat", borderwidth=0, font=("Segoe UI", 9), padx=14, pady=12)
+        self.activity.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        self.activity.configure(state="disabled")
+        self.activity.tag_configure("system", foreground=COLORS["muted"], font=("Cascadia Mono", 8, "bold"))
+        self.activity.tag_configure("user", foreground=COLORS["cyan"], font=("Cascadia Mono", 8, "bold"))
+        self.activity.tag_configure("jarvis", foreground=COLORS["green"], font=("Cascadia Mono", 8, "bold"))
+        self.activity.tag_configure("error", foreground=COLORS["red"], font=("Cascadia Mono", 8, "bold"))
+        tk.Label(panel, text="CHAT MODE OFF  //  ACTIVITY-ONLY VIEW", bg=COLORS["panel"], fg=COLORS["muted"], font=("Cascadia Mono", 8)).pack(anchor="w", padx=16, pady=(0, 14))
 
     def _build_footer(self) -> None:
         footer = tk.Frame(self, bg=COLORS["bg"])
@@ -289,11 +289,15 @@ class JarvisApp(tk.Tk):
         self.after(100, self._drain_events)
 
     def _write_log(self, speaker: str, text: str, color: str) -> None:
-        self.chat.configure(state="normal")
-        self.chat.insert("end", f"{speaker}\n", (speaker.lower() if speaker.lower() in {"system", "user", "jarvis", "error"} else "system",))
-        self.chat.insert("end", f"{text}\n\n")
-        self.chat.see("end")
-        self.chat.configure(state="disabled")
+        tag = speaker.lower() if speaker.lower() in {"system", "user", "jarvis", "error"} else "system"
+        for view in (getattr(self, "activity", None), getattr(self, "chat_view", None)):
+            if view is None or not view.winfo_exists():
+                continue
+            view.configure(state="normal")
+            view.insert("end", f"{speaker}\n", tag)
+            view.insert("end", f"{text}\n\n")
+            view.see("end")
+            view.configure(state="disabled")
 
     def _set_state(self, state: str, subtitle: str) -> None:
         self.ui_state = state
@@ -303,7 +307,43 @@ class JarvisApp(tk.Tk):
         self._draw_hud()
 
     def _focus_input(self) -> None:
+        if not self.chat_mode:
+            self._toggle_chat_mode()
+        if self.chat_mode and hasattr(self, "input"):
+            self.input.focus_set()
+
+    def _toggle_chat_mode(self) -> None:
+        if self.chat_mode:
+            self._close_chat_mode()
+            return
+        self.chat_mode = True
+        self.chat_mode_button.configure(text="DISABLE CHAT MODE")
+        self.chat_window = tk.Toplevel(self)
+        self.chat_window.title("JARVIS // CHAT MODE")
+        self.chat_window.configure(bg=COLORS["bg"])
+        self.chat_window.geometry("660x560")
+        self.chat_window.minsize(520, 420)
+        self.chat_window.transient(self)
+        self.chat_window.protocol("WM_DELETE_WINDOW", self._close_chat_mode)
+        tk.Label(self.chat_window, text="CHAT MODE", bg=COLORS["bg"], fg=COLORS["cyan"], font=("Segoe UI", 18, "bold")).pack(anchor="w", padx=24, pady=(22, 3))
+        tk.Label(self.chat_window, text="Direct conversation is enabled only while this window is open.", bg=COLORS["bg"], fg=COLORS["muted"], font=("Segoe UI", 9)).pack(anchor="w", padx=24, pady=(0, 16))
+        self.chat_view = ScrolledText(self.chat_window, wrap="word", bg="#07111d", fg=COLORS["text"], insertbackground=COLORS["cyan"], relief="flat", borderwidth=0, font=("Segoe UI", 10), padx=14, pady=12)
+        self.chat_view.pack(fill="both", expand=True, padx=24, pady=(0, 14))
+        self.chat_view.configure(state="disabled")
+        compose = tk.Frame(self.chat_window, bg=COLORS["bg"])
+        compose.pack(fill="x", padx=24, pady=(0, 22))
+        self.input = tk.Entry(compose, bg="#0d2030", fg=COLORS["text"], insertbackground=COLORS["cyan"], relief="flat", font=("Segoe UI", 11))
+        self.input.pack(side="left", fill="x", expand=True, ipady=10)
+        self.input.bind("<Return>", lambda _event: self._send())
+        ttk.Button(compose, text="SEND", style="Jarvis.TButton", command=self._send).pack(side="right", padx=(8, 0))
         self.input.focus_set()
+
+    def _close_chat_mode(self) -> None:
+        self.chat_mode = False
+        self.chat_mode_button.configure(text="ENABLE CHAT MODE")
+        if self.chat_window is not None and self.chat_window.winfo_exists():
+            self.chat_window.destroy()
+        self.chat_window = None
 
     def _interrupt(self) -> None:
         self._set_state("LISTENING", "INTERRUPT REQUESTED")

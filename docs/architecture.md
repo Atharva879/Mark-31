@@ -39,6 +39,10 @@ Bounded follow-up loop -> final response
 
 The API configuration window contains masked Gemini and OpenRouter fields, a temporary reveal toggle, provider order, and `SAVE + APPLY`. Values are written only to the local `.env` file and applied to the in-memory settings. They are never inserted into chat messages or audit fields. A future release should replace or supplement `.env` persistence with the Windows Credential Manager for stronger at-rest secret handling.
 
+The main window is activity-only by default. `ENABLE CHAT MODE` opens a separate, cleanly scaled chat window; `DISABLE CHAT MODE` closes it and returns to the activity feed. This keeps the HUD uncluttered while preserving an explicit interaction surface when the user wants direct conversation.
+
+The Discord adapter is optional and becomes available only when a bot token and approved channel IDs are configured. It uses the official Discord HTTP API, limits messages to 2,000 characters, restricts destinations to the allowlist, and registers sends as `MODERATE` so the user receives visible notification and an audit record.
+
 ## Current implemented slice
 
 The current branch includes a SQLite memory store, a scoped filesystem adapter, and an allowlisted application controller in addition to the original LLM router and dispatcher. Memory operations are explicit: notes and facts are written only through registered tools, recall is bounded, and forgetting a memory is sensitive. File operations require configured roots, enforce size limits, reject binary reads, and expose deletion only as a Recycle Bin move. Application control accepts configured executable paths only and fails closed on non-Windows hosts.

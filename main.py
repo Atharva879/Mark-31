@@ -18,6 +18,7 @@ from llm.schemas import RiskTier, ToolSpec
 from memory.store import MemoryStore
 from skills.apps import AppConfig, ApplicationController
 from skills.files import ScopedFileManager
+from skills.messaging_discord import DiscordClient
 from skills.mock_tools import echo_status, get_current_time
 
 
@@ -33,6 +34,7 @@ def build_runtime(settings: Settings | None = None) -> tuple[LLMRouter, Dispatch
         _register_file_tools(registry, ScopedFileManager(settings.allowed_roots))
 
     _register_application_tools(registry, _load_applications())
+    _register_discord_tools(registry)
 
     providers = {
         "gemini": GeminiClient(settings.gemini_api_key, settings.gemini_model, settings.request_timeout_seconds),
@@ -201,6 +203,31 @@ def _register_file_tools(registry: ToolRegistry, files: ScopedFileManager) -> No
             },
             risk=RiskTier.SENSITIVE,
             handler=files.recycle,
+        )
+    )
+
+
+def _register_discord_tools(registry: ToolRegistry) -> None:
+    token = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
+    channel_ids = [item.strip() for item in os.environ.get("DISCORD_ALLOWED_CHANNEL_IDS", "").split(",") if item.strip()]
+    if not token or not channel_ids:
+        return
+    client = DiscordClient(token, channel_ids)
+    registry.register(
+        ToolSpec(
+            name="send_discord_message",
+            description="Send a message to an explicitly allowlisted Discord channel.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "channel_id": {"type": "string", "maxLength": 30},
+                    "content": {"type": "string", "maxLength": 2_000},
+                },
+                "required": ["channel_id", "content"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.MODERATE,
+            handler=client.send_message,
         )
     )
 
