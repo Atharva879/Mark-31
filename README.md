@@ -23,7 +23,8 @@ The repository currently contains the first vertical slice:
 | Windows application controls | Implemented as an allowlisted adapter; fails closed outside Windows |
 | CLI diagnostics | Implemented |
 | Discord messaging | Implemented as an optional allowlisted moderate-risk tool |
-| WhatsApp/screen/scheduler integrations | Planned for later milestones |
+| WhatsApp Desktop messaging | Implemented as an optional dry-run-first UI Automation tool |
+| Screen/scheduler integrations | Planned for later milestones |
 | SimilarWeb analytics adapter | Planned for Milestone 10; credential/API boundary must be confirmed |
 
 ## Desktop interface
@@ -49,6 +50,8 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
 ```
+
+WhatsApp Desktop automation is disabled by default. Set `WHATSAPP_ENABLED=true` to register the tool, but keep `WHATSAPP_DRY_RUN=true` while testing. Real sends require the user to set `WHATSAPP_DRY_RUN=false`, have WhatsApp Desktop already installed and logged in, and accept that the integration depends on UI selectors that may change.
 
 The current build includes persistent memory and registers file tools when `JARVIS_ALLOWED_ROOTS` is configured. Application tools are always present but require an allowlist and a Windows host; they fail closed on other operating systems. The first milestone does not require Windows-only dependencies because the application adapter is not executable on the sandbox and file tools remain disabled until roots are configured. Install the Windows extras only when those integrations are being implemented:
 

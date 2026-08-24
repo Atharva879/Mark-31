@@ -43,6 +43,10 @@ The main window is activity-only by default. `ENABLE CHAT MODE` opens a separate
 
 The Discord adapter is optional and becomes available only when a bot token and approved channel IDs are configured. It uses the official Discord HTTP API, limits messages to 2,000 characters, restricts destinations to the allowlist, and registers sends as `MODERATE` so the user receives visible notification and an audit record.
 
+WhatsApp Desktop is an optional UI Automation adapter. It is disabled by default and remains dry-run by default even when enabled. In live mode it requires WhatsApp Desktop to be installed and already logged in, then searches for an explicit contact, selects the matching result, fills the message editor, and sends through the visible desktop application. Selector failures produce diagnostics instead of silently retrying another action. The action is `MODERATE` and is always audited by the dispatcher.
+
+The repository’s first feature branch has now been merged into `main`. Future milestones should branch from the latest `origin/main` so the default GitHub view remains current.
+
 ## Current implemented slice
 
 The current branch includes a SQLite memory store, a scoped filesystem adapter, and an allowlisted application controller in addition to the original LLM router and dispatcher. Memory operations are explicit: notes and facts are written only through registered tools, recall is bounded, and forgetting a memory is sensitive. File operations require configured roots, enforce size limits, reject binary reads, and expose deletion only as a Recycle Bin move. Application control accepts configured executable paths only and fails closed on non-Windows hosts.
