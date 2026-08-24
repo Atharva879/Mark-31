@@ -7,6 +7,7 @@ execution, diagnostics, and confirmation surface for the existing safe core.
 
 from __future__ import annotations
 
+import base64
 import os
 import queue
 import threading
@@ -17,6 +18,7 @@ from tkinter.scrolledtext import ScrolledText
 
 from config import Settings
 from main import build_runtime
+from skills.screen import ScreenCapture
 from ui_config import write_local_env
 
 try:
@@ -54,6 +56,7 @@ class JarvisApp(tk.Tk):
 
         self.settings = Settings.from_env()
         self.router, self.dispatcher, self.registry = build_runtime(self.settings)
+        self.screen = ScreenCapture(timeout_seconds=float(os.environ.get("JARVIS_SCREEN_TIMEOUT_SECONDS", "60")))
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.ui_state = "LISTENING"
         self._animation_tick = 0
@@ -115,14 +118,12 @@ class JarvisApp(tk.Tk):
             fg=COLORS["muted"],
             font=("Cascadia Mono", 9),
         ).grid(row=1, column=0, sticky="w")
-        self.connection_label = tk.Label(
-            header,
-            text="●  CORE ONLINE",
-            bg=COLORS["bg"],
-            fg=COLORS["green"],
-            font=("Cascadia Mono", 10, "bold"),
-        )
-        self.connection_label.grid(row=0, column=1, rowspan=2, sticky="e", padx=(0, 18))
+        status_cluster = tk.Frame(header, bg=COLORS["bg"])
+        status_cluster.grid(row=0, column=1, rowspan=2, sticky="e", padx=(0, 18))
+        self.connection_label = tk.Label(status_cluster, text="●  CORE ONLINE", bg=COLORS["bg"], fg=COLORS["green"], font=("Cascadia Mono", 10, "bold"))
+        self.connection_label.pack(anchor="e")
+        self.screen_indicator = tk.Label(status_cluster, text="○  SCREEN OFF", bg=COLORS["bg"], fg=COLORS["muted"], font=("Cascadia Mono", 8))
+        self.screen_indicator.pack(anchor="e", pady=(3, 0))
         ttk.Button(header, text="API CONFIG", style="Jarvis.TButton", command=self._open_api_config).grid(
             row=0, column=2, rowspan=2, sticky="e"
         )
@@ -197,6 +198,8 @@ class JarvisApp(tk.Tk):
         controls = tk.Frame(panel, bg=COLORS["bg"])
         controls.grid(row=3, column=0, pady=(0, 18))
         ttk.Button(controls, text="INITIALIZE", style="Jarvis.TButton", command=self._focus_input).pack(side="left", padx=5)
+        self.screen_button = ttk.Button(controls, text="ENABLE SCREEN", style="Jarvis.TButton", command=self._toggle_screen)
+        self.screen_button.pack(side="left", padx=5)
         self.chat_mode_button = ttk.Button(controls, text="ENABLE CHAT MODE", style="Jarvis.TButton", command=self._toggle_chat_mode)
         self.chat_mode_button.pack(side="left", padx=5)
         ttk.Button(controls, text="INTERRUPT", style="Jarvis.TButton", command=self._interrupt).pack(side="left", padx=5)
@@ -258,20 +261,48 @@ class JarvisApp(tk.Tk):
         tk.Label(footer, text="GEMINI + OPENROUTER FAILOVER", bg=COLORS["bg"], fg=COLORS["cyan_dim"], font=("Consolas", 8)).grid(row=0, column=1, sticky="e")
 
     def _send(self) -> None:
+        if not self.chat_mode or not hasattr(self, "input"):
+            self._write_log("SYSTEM", "Enable Chat Mode before entering a direct command.", COLORS["orange"])
+            return
         command = self.input.get().strip()
         if not command:
             return
         self.input.delete(0, "end")
         self._write_log("YOU", command, COLORS["cyan"])
-        self._set_state("THINKING", "ROUTING REQUEST")
+        self._set_state("THINKING", "ANALYZING REQUEST")
         threading.Thread(target=self._run_command, args=(command,), daemon=True).start()
 
     def _run_command(self, command: str) -> None:
         try:
-            response = self.router.run_tool_loop(command, self.registry.all(), self.dispatcher)
+            if command.lower().startswith("/screen "):
+                response = self._analyze_screen(command[8:].strip())
+            else:
+                response = self.router.run_tool_loop(command, self.registry.all(), self.dispatcher)
             self.events.put(("response", response or "Action completed."))
         except Exception as exc:
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
+
+    def _analyze_screen(self, prompt: str) -> str:
+        if not self.screen.status().active:
+            raise PermissionError("Enable Screen Awareness before using /screen analysis")
+        provider = self.router.providers.get("gemini")
+        if provider is None or not hasattr(provider, "analyze_image"):
+            raise RuntimeError("Gemini vision provider is unavailable")
+        image = base64.b64decode(self.screen.capture_png_base64())
+        return provider.analyze_image(image, prompt or "Describe the visible screen and identify any obvious issue.").content
+
+    def _toggle_screen(self) -> None:
+        if self.screen.status().active:
+            self.screen.disable("user_toggle")
+            self.screen_button.configure(text="ENABLE SCREEN")
+            self.screen_indicator.configure(text="○  SCREEN OFF", fg=COLORS["muted"])
+            self._write_log("SYSTEM", "Screen awareness disabled. No screenshot is active.", COLORS["muted"])
+        else:
+            self.screen.enable("user_toggle")
+            self.screen_button.configure(text="DISABLE SCREEN")
+            self.screen_indicator.configure(text="●  SCREEN ACTIVE", fg=COLORS["red"])
+            self._write_log("SYSTEM", "Screen awareness enabled for a limited session. Use /screen <question>.", COLORS["orange"])
+
 
     def _drain_events(self) -> None:
         try:

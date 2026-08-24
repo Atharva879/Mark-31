@@ -6,6 +6,7 @@ translation isolated from the rest of the application.
 
 from __future__ import annotations
 
+import base64
 import json
 from typing import Any, Mapping
 
@@ -21,6 +22,32 @@ class GeminiClient:
         self.api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
+
+    def analyze_image(self, png_bytes: bytes, prompt: str) -> LLMResponse:
+        """Analyze an in-memory PNG with Gemini vision; the image is not persisted."""
+        if not self.api_key:
+            raise RuntimeError("GEMINI_API_KEY is not configured")
+        if not isinstance(png_bytes, bytes) or not png_bytes:
+            raise ValueError("A non-empty PNG byte payload is required")
+        if not prompt.strip():
+            raise ValueError("Vision prompt cannot be empty")
+        body = {
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    {"text": prompt[:4_000]},
+                    {"inline_data": {"mime_type": "image/png", "data": base64.b64encode(png_bytes).decode("ascii")}},
+                ],
+            }]
+        }
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
+            f"?key={self.api_key}"
+        )
+        response = requests.post(url, json=body, timeout=self.timeout_seconds)
+        if response.status_code >= 400:
+            raise RuntimeError(f"Gemini HTTP {response.status_code}: {response.text[:500]}")
+        return _parse_response(response.json())
 
     def complete(self, messages: list[ChatMessage], tools: list[ToolSpec]) -> LLMResponse:
         if not self.api_key:
