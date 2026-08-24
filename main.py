@@ -19,6 +19,7 @@ from memory.store import MemoryStore
 from skills.apps import AppConfig, ApplicationController
 from skills.files import ScopedFileManager
 from skills.messaging_discord import DiscordClient
+from skills.messaging_whatsapp import WhatsAppDesktopClient
 from skills.mock_tools import echo_status, get_current_time
 
 
@@ -35,6 +36,7 @@ def build_runtime(settings: Settings | None = None) -> tuple[LLMRouter, Dispatch
 
     _register_application_tools(registry, _load_applications())
     _register_discord_tools(registry)
+    _register_whatsapp_tools(registry)
 
     providers = {
         "gemini": GeminiClient(settings.gemini_api_key, settings.gemini_model, settings.request_timeout_seconds),
@@ -224,6 +226,30 @@ def _register_discord_tools(registry: ToolRegistry) -> None:
                     "content": {"type": "string", "maxLength": 2_000},
                 },
                 "required": ["channel_id", "content"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.MODERATE,
+            handler=client.send_message,
+        )
+    )
+
+
+def _register_whatsapp_tools(registry: ToolRegistry) -> None:
+    if os.environ.get("WHATSAPP_ENABLED", "false").strip().lower() not in {"1", "true", "yes", "on"}:
+        return
+    dry_run = os.environ.get("WHATSAPP_DRY_RUN", "true").strip().lower() not in {"0", "false", "no", "off"}
+    client = WhatsAppDesktopClient(dry_run=dry_run)
+    registry.register(
+        ToolSpec(
+            name="send_whatsapp_message",
+            description="Send a WhatsApp Desktop message to a named contact; dry-run is enabled by default.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "contact": {"type": "string", "maxLength": 300},
+                    "content": {"type": "string", "maxLength": 4_096},
+                },
+                "required": ["contact", "content"],
                 "additionalProperties": False,
             },
             risk=RiskTier.MODERATE,
