@@ -25,6 +25,7 @@ The repository currently contains the first vertical slice:
 | Discord messaging | Implemented as an optional allowlisted moderate-risk tool |
 | WhatsApp Desktop messaging | Implemented as an optional dry-run-first UI Automation tool |
 | Screen awareness | Implemented as opt-in, visible, time-limited Gemini vision support |
+| Voice input and speech synthesis | Implemented as optional local push-to-talk voice support |
 | Scheduler/clipboard integrations | Planned for later milestones |
 | SimilarWeb analytics adapter | Planned for Milestone 10; credential/API boundary must be confirmed |
 
@@ -55,6 +56,8 @@ Copy-Item .env.example .env
 WhatsApp Desktop automation is disabled by default. Set `WHATSAPP_ENABLED=true` to register the tool, but keep `WHATSAPP_DRY_RUN=true` while testing. Real sends require the user to set `WHATSAPP_DRY_RUN=false`, have WhatsApp Desktop already installed and logged in, and accept that the integration depends on UI selectors that may change.
 
 Screen awareness is controlled by the `ENABLE SCREEN` button in the desktop UI. It is off by default, shows a red active indicator when enabled, and automatically expires after `JARVIS_SCREEN_TIMEOUT_SECONDS`. In Chat Mode, use `/screen <question>` to send one in-memory screenshot to Gemini vision. Screenshots are not written to disk by this milestone.
+
+Voice input is activated explicitly with `START VOICE`. Each press records one bounded local utterance, transcribes it with `faster-whisper`, sends the resulting text through the same dispatcher and safety rules as typed commands, and then reads the response aloud with `pyttsx3`. Use `INTERRUPT` to stop speech output. Audio is not uploaded by the local adapters, and the microphone is not left listening continuously.
 
 The current build includes persistent memory and registers file tools when `JARVIS_ALLOWED_ROOTS` is configured. Application tools are always present but require an allowlist and a Windows host; they fail closed on other operating systems. The first milestone does not require Windows-only dependencies because the application adapter is not executable on the sandbox and file tools remain disabled until roots are configured. Install the Windows extras only when those integrations are being implemented:
 

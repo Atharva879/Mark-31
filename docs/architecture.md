@@ -49,6 +49,8 @@ The repository’s first feature branch has now been merged into `main`. Future 
 
 Screen awareness is opt-in and separate from the normal tool loop. The UI must show `SCREEN ACTIVE` while capture is enabled, and `ScreenCapture` automatically expires the session after the configured timeout. A `/screen <question>` command captures one PNG in memory and sends it to the Gemini vision adapter; it does not write the image to disk or pass it through an unrelated provider. The capture backend rejects calls while disabled and caps payload size before encoding.
 
+Voice input follows a push-to-talk lifecycle: `START VOICE` records one bounded utterance, writes a temporary WAV only for the local transcription step, deletes it in a `finally` block, and submits the normalized transcript through the ordinary dispatcher. Voice output uses a separate worker thread so the UI remains responsive; `INTERRUPT` calls the synthesizer stop hook and returns the visible state to `LISTENING`. Missing optional audio dependencies fail with a setup message rather than activating a different capture path.
+
 ## Current implemented slice
 
 The current branch includes a SQLite memory store, a scoped filesystem adapter, and an allowlisted application controller in addition to the original LLM router and dispatcher. Memory operations are explicit: notes and facts are written only through registered tools, recall is bounded, and forgetting a memory is sensitive. File operations require configured roots, enforce size limits, reject binary reads, and expose deletion only as a Recycle Bin move. Application control accepts configured executable paths only and fails closed on non-Windows hosts.

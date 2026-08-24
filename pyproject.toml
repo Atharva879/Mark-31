@@ -27,6 +27,8 @@ windows = [
 voice = [
   "faster-whisper>=1.0,<2",
   "pyttsx3>=2.90,<3",
+  "sounddevice>=0.4,<1",
+  "soundfile>=0.12,<1",
 ]
 dev = [
   "pytest>=8,<9",
