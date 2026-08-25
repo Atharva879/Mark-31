@@ -166,3 +166,9 @@ The full implementation roadmap is captured in [`docs/architecture.md`](docs/arc
 12. Calendar, draft-only Gmail, and optional local voice I/O.
 
 Each milestone should be implemented separately, tested with mocks before real actions are enabled, and reviewed for secret leakage and permission bypasses.
+
+## Secrets and local recovery
+
+Mark-31 includes a `SecretStore` abstraction that uses Windows DPAPI when the Windows backend is available. It deliberately fails closed on unsupported platforms or missing DPAPI support instead of falling back to plaintext storage. Existing `.env` files are not migrated automatically; a user must explicitly choose a future migration flow.
+
+`BackupManager` creates integrity-checked ZIP archives for explicitly selected local files, writes a versioned manifest with SHA-256 checksums, excludes `.env` files, and rejects unsafe archive paths during validation and restore. Backups are local-only and do not upload data or credentials. Restore remains an explicit, user-confirmed operation.

@@ -30,7 +30,9 @@ from skills.mock_tools import echo_status, get_current_time
 from skills.multimodal import MultimodalIngestor
 from skills.shell import SafeCommandExecutor
 from skills.web import WebClient
+from backup import BackupManager
 from scheduler import BackgroundScheduler, SchedulerStore
+from secrets import SecretStore
 from workflows import SafeWorkflowEngine, WorkflowStep, WorkflowStore
 from startup import StartupManager
 
@@ -67,6 +69,9 @@ def build_runtime(
         Path(os.environ.get("JARVIS_WORKFLOW_DB", "memory/workflows.db"))
     )
     startup_manager = StartupManager(Path(__file__).resolve())
+    data_root = Path(os.environ.get("JARVIS_DATA_ROOT", "memory"))
+    secret_store = SecretStore(data_root / "secrets.dpapi")
+    backup_manager = BackupManager(data_root)
 
     monitor_web = _build_web_client()
     monitor_files = ScopedFileManager(settings.allowed_roots) if settings.allowed_roots else None
@@ -146,6 +151,8 @@ def build_runtime(
     registry.workflow_engine = workflow_engine
     _register_startup_tools(registry, startup_manager)
     registry.startup_manager = startup_manager
+    registry.secret_store = secret_store
+    registry.backup_manager = backup_manager
     return router, dispatcher, registry
 
 
