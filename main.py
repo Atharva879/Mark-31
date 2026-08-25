@@ -32,6 +32,7 @@ from skills.shell import SafeCommandExecutor
 from skills.web import WebClient
 from scheduler import BackgroundScheduler, SchedulerStore
 from workflows import SafeWorkflowEngine, WorkflowStep, WorkflowStore
+from startup import StartupManager
 
 
 def build_runtime(
@@ -65,6 +66,7 @@ def build_runtime(
     workflow_store = WorkflowStore(
         Path(os.environ.get("JARVIS_WORKFLOW_DB", "memory/workflows.db"))
     )
+    startup_manager = StartupManager(Path(__file__).resolve())
 
     monitor_web = _build_web_client()
     monitor_files = ScopedFileManager(settings.allowed_roots) if settings.allowed_roots else None
@@ -142,6 +144,8 @@ def build_runtime(
     _register_workflow_tools(registry, workflow_store, workflow_engine)
     registry.scheduler = scheduler
     registry.workflow_engine = workflow_engine
+    _register_startup_tools(registry, startup_manager)
+    registry.startup_manager = startup_manager
     return router, dispatcher, registry
 
 
@@ -261,6 +265,38 @@ def _register_personal_tools(
             },
             risk=RiskTier.SAFE,
             handler=store.list_email_drafts,
+        )
+    )
+
+
+def _register_startup_tools(registry: ToolRegistry, manager: StartupManager) -> None:
+    registry.register(
+        ToolSpec(
+            name="startup_status",
+            description="Return whether the optional Windows startup launcher is enabled.",
+            parameters={"type": "object", "properties": {}, "additionalProperties": False},
+            risk=RiskTier.SAFE,
+            handler=manager.status,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="enable_startup",
+            description="Enable the per-user Windows startup launcher for Mark-31.",
+            parameters={"type": "object", "properties": {}, "additionalProperties": False},
+            risk=RiskTier.SENSITIVE,
+            confirmation_required=True,
+            handler=manager.enable,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="disable_startup",
+            description="Disable the per-user Windows startup launcher for Mark-31.",
+            parameters={"type": "object", "properties": {}, "additionalProperties": False},
+            risk=RiskTier.SENSITIVE,
+            confirmation_required=True,
+            handler=manager.disable,
         )
     )
 
