@@ -240,8 +240,34 @@ class JarvisApp(tk.Tk):
                 handler=self.interactive_browser.fill,
             )
         )
+        self.registry.register(
+            ToolSpec(
+                name="interactive_browser_credential_handoff",
+                description="Pause so the user can enter credentials and complete MFA manually.",
+                parameters={"type": "object", "properties": {}, "additionalProperties": False},
+                risk=RiskTier.SENSITIVE,
+                confirmation_required=True,
+                handler=self.interactive_browser.credential_handoff,
+            )
+        )
+        self.registry.register(
+            ToolSpec(
+                name="interactive_browser_submit",
+                description="Submit a reviewed browser form after immediate user confirmation.",
+                parameters={
+                    "type": "object",
+                    "properties": {"selector": {"type": "string", "maxLength": 300}},
+                    "required": ["selector"],
+                    "additionalProperties": False,
+                },
+                risk=RiskTier.SENSITIVE,
+                confirmation_required=True,
+                handler=self.interactive_browser.submit,
+            )
+        )
 
     def _build_runtime(self):
+
         return build_runtime(
             self.settings, confirm=self._confirm_sensitive_action, notify=self._notify_tool
         )
