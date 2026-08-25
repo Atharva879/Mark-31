@@ -25,6 +25,7 @@ from skills.files import ScopedFileManager
 from skills.messaging_discord import DiscordClient
 from skills.messaging_whatsapp import WhatsAppDesktopClient
 from skills.monitoring import MonitorRegistry
+from skills.personal import ICalendarReader, PersonalStore
 from skills.mock_tools import echo_status, get_current_time
 from skills.multimodal import MultimodalIngestor
 from skills.shell import SafeCommandExecutor
@@ -56,6 +57,9 @@ def build_runtime(
     _register_browser_tools(registry)
     _register_advanced_file_tools(registry, settings)
     _register_code_sandbox_tool(registry)
+    personal_store = PersonalStore(Path(os.environ.get("JARVIS_PERSONAL_DB", "memory/personal.db")))
+    calendar_path = _configured_calendar_path(settings)
+    _register_personal_tools(registry, personal_store, ICalendarReader(calendar_path))
 
     monitor_web = _build_web_client()
     monitor_files = ScopedFileManager(settings.allowed_roots) if settings.allowed_roots else None
@@ -68,8 +72,12 @@ def build_runtime(
     )
 
     providers = {
-        "local": LocalLLMClient(settings.local_model, settings.local_base_url, settings.request_timeout_seconds),
-        "gemini": GeminiClient(settings.gemini_api_key, settings.gemini_model, settings.request_timeout_seconds),
+        "local": LocalLLMClient(
+            settings.local_model, settings.local_base_url, settings.request_timeout_seconds
+        ),
+        "gemini": GeminiClient(
+            settings.gemini_api_key, settings.gemini_model, settings.request_timeout_seconds
+        ),
         "openrouter": OpenRouterClient(
             settings.openrouter_api_key,
             settings.openrouter_model,
@@ -101,7 +109,15 @@ def build_runtime(
                             "type": "object",
                             "properties": {
                                 "task_id": {"type": "string", "maxLength": 80},
-                                "role": {"type": "string", "enum": ["researcher", "memory_analyst", "file_analyst", "synthesizer"]},
+                                "role": {
+                                    "type": "string",
+                                    "enum": [
+                                        "researcher",
+                                        "memory_analyst",
+                                        "file_analyst",
+                                        "synthesizer",
+                                    ],
+                                },
                                 "prompt": {"type": "string", "maxLength": 4000},
                             },
                             "required": ["role", "prompt"],
@@ -126,7 +142,118 @@ def _build_web_client() -> WebClient:
         timeout_seconds=float(os.environ.get("JARVIS_WEB_TIMEOUT_SECONDS", "15")),
         max_response_bytes=int(os.environ.get("JARVIS_WEB_MAX_RESPONSE_BYTES", "1000000")),
         max_results=int(os.environ.get("JARVIS_WEB_MAX_RESULTS", "5")),
-        allowed_hosts={item.strip().lower() for item in os.environ.get("JARVIS_WEB_ALLOWED_HOSTS", "").split(",") if item.strip()},
+        allowed_hosts={
+            item.strip().lower()
+            for item in os.environ.get("JARVIS_WEB_ALLOWED_HOSTS", "").split(",")
+            if item.strip()
+        },
+    )
+
+
+def _configured_calendar_path(settings: Settings) -> Path | None:
+    raw_path = os.environ.get("JARVIS_CALENDAR_ICS", "").strip()
+    if not raw_path:
+        return None
+    candidate = Path(raw_path).expanduser().resolve()
+    if not settings.allowed_roots:
+        return None
+    if not any(candidate == root or root in candidate.parents for root in settings.allowed_roots):
+        return None
+    return candidate
+
+
+def _register_personal_tools(
+    registry: ToolRegistry, store: PersonalStore, calendar: ICalendarReader
+) -> None:
+    registry.register(
+        ToolSpec(
+            name="create_task",
+            description="Create a local task. This never contacts an external task service.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "maxLength": 200},
+                    "notes": {"type": "string", "maxLength": 2000},
+                    "due_at": {"type": ["string", "null"], "maxLength": 80},
+                },
+                "required": ["title"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.MODERATE,
+            handler=lambda title, notes="", due_at=None: store.create_task(title, notes, due_at),
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="list_tasks",
+            description="List local incomplete or completed tasks.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "include_completed": {"type": "boolean"},
+                    "limit": {"type": "integer", "maximum": 100},
+                },
+                "additionalProperties": False,
+            },
+            risk=RiskTier.SAFE,
+            handler=lambda include_completed=False, limit=100: store.list_tasks(
+                include_completed, limit
+            ),
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="complete_task",
+            description="Mark one local task complete.",
+            parameters={
+                "type": "object",
+                "properties": {"task_id": {"type": "integer", "minimum": 1}},
+                "required": ["task_id"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.MODERATE,
+            handler=store.complete_task,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="list_calendar_events",
+            description="Read bounded events from the explicitly configured local iCalendar file.",
+            parameters={"type": "object", "properties": {}, "additionalProperties": False},
+            risk=RiskTier.SAFE,
+            handler=calendar.list_events,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="create_email_draft",
+            description="Save a local email draft; this tool never sends email or contacts an account.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "recipient": {"type": "string", "maxLength": 320},
+                    "subject": {"type": "string", "maxLength": 200},
+                    "body": {"type": "string", "maxLength": 20000},
+                },
+                "required": ["recipient", "subject", "body"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.MODERATE,
+            handler=store.create_email_draft,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="list_email_drafts",
+            description="List local email drafts without sending them.",
+            parameters={
+                "type": "object",
+                "properties": {"limit": {"type": "integer", "maximum": 50}},
+                "additionalProperties": False,
+            },
+            risk=RiskTier.SAFE,
+            handler=store.list_email_drafts,
+        )
     )
 
 
@@ -148,7 +275,9 @@ def _register_scheduler_tools(registry: ToolRegistry, scheduler: BackgroundSched
                 "additionalProperties": False,
             },
             risk=RiskTier.MODERATE,
-            handler=lambda name, kind, interval_seconds, payload, enabled=True: scheduler.create_trigger(name, kind, interval_seconds, payload, enabled),
+            handler=lambda name, kind, interval_seconds, payload, enabled=True: (
+                scheduler.create_trigger(name, kind, interval_seconds, payload, enabled)
+            ),
         )
     )
     registry.register(
@@ -175,7 +304,10 @@ def _register_scheduler_tools(registry: ToolRegistry, scheduler: BackgroundSched
             description="Enable or disable a persistent monitoring trigger.",
             parameters={
                 "type": "object",
-                "properties": {"trigger_id": {"type": "string", "maxLength": 80}, "enabled": {"type": "boolean"}},
+                "properties": {
+                    "trigger_id": {"type": "string", "maxLength": 80},
+                    "enabled": {"type": "boolean"},
+                },
                 "required": ["trigger_id", "enabled"],
                 "additionalProperties": False,
             },
@@ -187,7 +319,12 @@ def _register_scheduler_tools(registry: ToolRegistry, scheduler: BackgroundSched
         ToolSpec(
             name="run_monitor_now",
             description="Run one configured monitor immediately without changing local or external state.",
-            parameters={"type": "object", "properties": {"trigger_id": {"type": "string", "maxLength": 80}}, "required": ["trigger_id"], "additionalProperties": False},
+            parameters={
+                "type": "object",
+                "properties": {"trigger_id": {"type": "string", "maxLength": 80}},
+                "required": ["trigger_id"],
+                "additionalProperties": False,
+            },
             risk=RiskTier.MODERATE,
             handler=scheduler.run_once,
         )
@@ -196,9 +333,17 @@ def _register_scheduler_tools(registry: ToolRegistry, scheduler: BackgroundSched
         ToolSpec(
             name="delete_monitor_trigger",
             description="Delete a persistent monitoring trigger and retain its historical run records.",
-            parameters={"type": "object", "properties": {"trigger_id": {"type": "string", "maxLength": 80}}, "required": ["trigger_id"], "additionalProperties": False},
+            parameters={
+                "type": "object",
+                "properties": {"trigger_id": {"type": "string", "maxLength": 80}},
+                "required": ["trigger_id"],
+                "additionalProperties": False,
+            },
             risk=RiskTier.SENSITIVE,
-            handler=lambda trigger_id: {"deleted": scheduler.delete(trigger_id), "trigger_id": trigger_id},
+            handler=lambda trigger_id: {
+                "deleted": scheduler.delete(trigger_id),
+                "trigger_id": trigger_id,
+            },
         )
     )
 
@@ -293,7 +438,9 @@ def _register_core_tools(registry: ToolRegistry, memory: LongTermMemory) -> None
                 "additionalProperties": False,
             },
             risk=RiskTier.SAFE,
-            handler=lambda query, limit=10, min_score=0.1: memory.semantic_recall(query, limit, min_score),
+            handler=lambda query, limit=10, min_score=0.1: memory.semantic_recall(
+                query, limit, min_score
+            ),
         )
     )
     registry.register(
@@ -353,7 +500,9 @@ def _register_file_tools(registry: ToolRegistry, files: ScopedFileManager) -> No
                 "additionalProperties": False,
             },
             risk=RiskTier.MODERATE,
-            handler=lambda path, content, overwrite=False: files.write_text(path, content, overwrite),
+            handler=lambda path, content, overwrite=False: files.write_text(
+                path, content, overwrite
+            ),
         )
     )
     registry.register(
@@ -391,7 +540,11 @@ def _register_file_tools(registry: ToolRegistry, files: ScopedFileManager) -> No
 
 def _register_discord_tools(registry: ToolRegistry) -> None:
     token = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
-    channel_ids = [item.strip() for item in os.environ.get("DISCORD_ALLOWED_CHANNEL_IDS", "").split(",") if item.strip()]
+    channel_ids = [
+        item.strip()
+        for item in os.environ.get("DISCORD_ALLOWED_CHANNEL_IDS", "").split(",")
+        if item.strip()
+    ]
     if not token or not channel_ids:
         return
     client = DiscordClient(token, channel_ids)
@@ -432,7 +585,9 @@ def _register_advanced_file_tools(registry: ToolRegistry, settings: Settings) ->
                 "additionalProperties": False,
             },
             risk=RiskTier.SAFE,
-            handler=lambda query="*", directory=".", max_results=100: files.find_files(query, directory, max_results),
+            handler=lambda query="*", directory=".", max_results=100: files.find_files(
+                query, directory, max_results
+            ),
         )
     )
     registry.register(
@@ -508,7 +663,9 @@ def _register_code_sandbox_tool(registry: ToolRegistry) -> None:
 def _register_shell_tools(registry: ToolRegistry, settings: Settings) -> None:
     allowlist = {
         item.strip().lower()
-        for item in os.environ.get("JARVIS_SHELL_ALLOWLIST", "echo,whoami,where,ipconfig,git").split(",")
+        for item in os.environ.get(
+            "JARVIS_SHELL_ALLOWLIST", "echo,whoami,where,ipconfig,git"
+        ).split(",")
         if item.strip()
     }
     executor = SafeCommandExecutor(
@@ -531,7 +688,9 @@ def _register_shell_tools(registry: ToolRegistry, settings: Settings) -> None:
                 "additionalProperties": False,
             },
             risk=RiskTier.SENSITIVE,
-            handler=lambda command, working_directory=None: executor.execute(command, working_directory),
+            handler=lambda command, working_directory=None: executor.execute(
+                command, working_directory
+            ),
         )
     )
 
@@ -541,7 +700,11 @@ def _register_browser_tools(registry: ToolRegistry) -> None:
         timeout_seconds=float(os.environ.get("JARVIS_WEB_TIMEOUT_SECONDS", "15")),
         max_response_bytes=int(os.environ.get("JARVIS_WEB_MAX_RESPONSE_BYTES", "1000000")),
         max_results=int(os.environ.get("JARVIS_WEB_MAX_RESULTS", "5")),
-        allowed_hosts={item.strip().lower() for item in os.environ.get("JARVIS_WEB_ALLOWED_HOSTS", "").split(",") if item.strip()},
+        allowed_hosts={
+            item.strip().lower()
+            for item in os.environ.get("JARVIS_WEB_ALLOWED_HOSTS", "").split(",")
+            if item.strip()
+        },
     )
     browser = ReadOnlyBrowser(client)
     registry.register(
@@ -583,7 +746,10 @@ def _register_multimodal_tools(registry: ToolRegistry, settings: Settings) -> No
                 "additionalProperties": False,
             },
             risk=RiskTier.SAFE,
-            handler=lambda path, request: {"document": ingestor.extract_document(path).__dict__, "status": "extracted_for_analysis"},
+            handler=lambda path, request: {
+                "document": ingestor.extract_document(path).__dict__,
+                "status": "extracted_for_analysis",
+            },
         )
     )
 
@@ -592,8 +758,17 @@ def _register_web_tools(registry: ToolRegistry) -> None:
     max_results = int(os.environ.get("JARVIS_WEB_MAX_RESULTS", "5"))
     max_bytes = int(os.environ.get("JARVIS_WEB_MAX_RESPONSE_BYTES", "1000000"))
     timeout = float(os.environ.get("JARVIS_WEB_TIMEOUT_SECONDS", "15"))
-    allowed_hosts = {item.strip().lower() for item in os.environ.get("JARVIS_WEB_ALLOWED_HOSTS", "").split(",") if item.strip()}
-    client = WebClient(timeout_seconds=timeout, max_response_bytes=max_bytes, max_results=max_results, allowed_hosts=allowed_hosts)
+    allowed_hosts = {
+        item.strip().lower()
+        for item in os.environ.get("JARVIS_WEB_ALLOWED_HOSTS", "").split(",")
+        if item.strip()
+    }
+    client = WebClient(
+        timeout_seconds=timeout,
+        max_response_bytes=max_bytes,
+        max_results=max_results,
+        allowed_hosts=allowed_hosts,
+    )
     registry.register(
         ToolSpec(
             name="web_search",
@@ -631,9 +806,19 @@ def _register_web_tools(registry: ToolRegistry) -> None:
 
 
 def _register_whatsapp_tools(registry: ToolRegistry) -> None:
-    if os.environ.get("WHATSAPP_ENABLED", "false").strip().lower() not in {"1", "true", "yes", "on"}:
+    if os.environ.get("WHATSAPP_ENABLED", "false").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
         return
-    dry_run = os.environ.get("WHATSAPP_DRY_RUN", "true").strip().lower() not in {"0", "false", "no", "off"}
+    dry_run = os.environ.get("WHATSAPP_DRY_RUN", "true").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
     client = WhatsAppDesktopClient(dry_run=dry_run)
     registry.register(
         ToolSpec(
@@ -692,17 +877,23 @@ def _load_applications() -> ApplicationController:
     try:
         entries = json.loads(raw)
         applications = {
-            str(name): AppConfig(str(name), Path(data["executable"]), tuple(data.get("arguments", [])))
+            str(name): AppConfig(
+                str(name), Path(data["executable"]), tuple(data.get("arguments", []))
+            )
             for name, data in entries.items()
         }
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-        raise ValueError("JARVIS_APP_ALLOWLIST must be a JSON object of app configurations") from exc
+        raise ValueError(
+            "JARVIS_APP_ALLOWLIST must be a JSON object of app configurations"
+        ) from exc
     return ApplicationController(applications)
 
 
 def run_cli() -> None:
     router, dispatcher, registry = build_runtime()
-    print("Jarvis is ready. Type 'exit' to quit; type 'tools' to list tools; type 'diagnostics' for checks.")
+    print(
+        "Jarvis is ready. Type 'exit' to quit; type 'tools' to list tools; type 'diagnostics' for checks."
+    )
     while True:
         try:
             command = input("You> ").strip()
@@ -718,7 +909,9 @@ def run_cli() -> None:
         if command.lower() == "diagnostics":
             print(f"Registered tools: {len(registry.all())}")
             print(f"Providers: {', '.join(router.settings.provider_order)}")
-            print(f"Models: local={router.settings.local_model}, gemini={router.settings.gemini_model}, openrouter={router.settings.openrouter_model}")
+            print(
+                f"Models: local={router.settings.local_model}, gemini={router.settings.gemini_model}, openrouter={router.settings.openrouter_model}"
+            )
             print(f"Audit log: {router.settings.audit_log_path}")
             print(f"Memory database: {router.settings.memory_db_path}")
             print(f"Vector database: {router.settings.vector_db_path}")
@@ -736,12 +929,15 @@ def run_cli() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Launch the Jarvis local assistant")
-    parser.add_argument("--cli", action="store_true", help="Use the terminal interface instead of the desktop UI")
+    parser.add_argument(
+        "--cli", action="store_true", help="Use the terminal interface instead of the desktop UI"
+    )
     args = parser.parse_args()
     if args.cli:
         run_cli()
     else:
         from ui import run_app
+
         run_app()
 
 
