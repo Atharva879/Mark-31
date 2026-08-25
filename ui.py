@@ -674,7 +674,7 @@ class JarvisApp(tk.Tk):
         window = tk.Toplevel(self)
         window.title("JARVIS // API CONFIGURATION")
         window.configure(bg=COLORS["bg"])
-        window.geometry("560x440")
+        window.geometry("680x760")
         window.resizable(False, False)
         window.transient(self)
         window.grab_set()
@@ -685,30 +685,45 @@ class JarvisApp(tk.Tk):
         gemini_var = tk.StringVar(value=self.settings.gemini_api_key)
         openrouter_var = tk.StringVar(value=self.settings.openrouter_api_key)
         order_var = tk.StringVar(value=",".join(self.settings.provider_order))
-        fields = []
-        for row, label, variable in ((0, "GEMINI API KEY", gemini_var), (1, "OPENROUTER API KEY", openrouter_var), (2, "PROVIDER ORDER", order_var)):
-            tk.Label(form, text=label, bg=COLORS["bg"], fg=COLORS["muted"], font=("Consolas", 8, "bold")).grid(row=row * 2, column=0, sticky="w", pady=(8, 4))
-            entry = tk.Entry(form, textvariable=variable, bg="#0d2030", fg=COLORS["text"], insertbackground=COLORS["cyan"], relief="flat", font=("Consolas", 10), show="•" if row < 2 else "")
-            entry.grid(row=row * 2 + 1, column=0, sticky="ew", ipady=8)
-            fields.append(entry)
+        gemini_model_var = tk.StringVar(value=self.settings.gemini_model)
+        openrouter_model_var = tk.StringVar(value=self.settings.openrouter_model)
+        local_model_var = tk.StringVar(value=self.settings.local_model)
+        local_url_var = tk.StringVar(value=self.settings.local_base_url)
+        key_fields = []
+        entries = (
+            ("GEMINI API KEY", gemini_var, True),
+            ("OPENROUTER API KEY", openrouter_var, True),
+            ("FALLBACK ORDER", order_var, False),
+            ("GEMINI MODEL", gemini_model_var, False),
+            ("OPENROUTER MODEL", openrouter_model_var, False),
+            ("LOCAL MODEL", local_model_var, False),
+            ("LOCAL ENDPOINT", local_url_var, False),
+        )
+        for row, (label, variable, secret) in enumerate(entries):
+            tk.Label(form, text=label, bg=COLORS["bg"], fg=COLORS["muted"], font=("Consolas", 8, "bold")).grid(row=row * 2, column=0, sticky="w", pady=(6, 3))
+            entry = tk.Entry(form, textvariable=variable, bg="#0d2030", fg=COLORS["text"], insertbackground=COLORS["cyan"], relief="flat", font=("Consolas", 10), show="•" if secret else "")
+            entry.grid(row=row * 2 + 1, column=0, sticky="ew", ipady=7)
+            if secret:
+                key_fields.append(entry)
         form.grid_columnconfigure(0, weight=1)
         show_var = tk.BooleanVar(value=False)
         def toggle_keys() -> None:
-            for entry in fields[:2]:
+            for entry in key_fields:
                 entry.configure(show="" if show_var.get() else "•")
-        tk.Checkbutton(window, text="SHOW API KEYS", variable=show_var, command=toggle_keys, bg=COLORS["bg"], fg=COLORS["muted"], selectcolor=COLORS["panel"], activebackground=COLORS["bg"], activeforeground=COLORS["cyan"], font=("Consolas", 8)).pack(anchor="w", padx=28, pady=14)
+        tk.Checkbutton(window, text="SHOW API KEYS", variable=show_var, command=toggle_keys, bg=COLORS["bg"], fg=COLORS["muted"], selectcolor=COLORS["panel"], activebackground=COLORS["bg"], activeforeground=COLORS["cyan"], font=("Consolas", 8)).pack(anchor="w", padx=28, pady=(12, 8))
+        tk.Label(window, text="LOCAL PROVIDERS MUST USE A LOOPBACK ENDPOINT. FALLBACK ORDER ACCEPTS local, gemini, openrouter.", bg=COLORS["bg"], fg=COLORS["cyan_dim"], font=("Cascadia Mono", 7)).pack(anchor="w", padx=28, pady=(0, 8))
         buttons = tk.Frame(window, bg=COLORS["bg"])
         buttons.pack(fill="x", padx=28, pady=12)
         ttk.Button(buttons, text="CANCEL", style="Jarvis.TButton", command=window.destroy).pack(side="right", padx=(8, 0))
-        ttk.Button(buttons, text="SAVE + APPLY", style="Jarvis.TButton", command=lambda: self._save_api_config(window, gemini_var.get(), openrouter_var.get(), order_var.get())).pack(side="right")
+        ttk.Button(buttons, text="SAVE + APPLY", style="Jarvis.TButton", command=lambda: self._save_api_config(window, gemini_var.get(), openrouter_var.get(), order_var.get(), gemini_model_var.get(), openrouter_model_var.get(), local_model_var.get(), local_url_var.get())).pack(side="right")
 
-    def _save_api_config(self, window: tk.Toplevel, gemini_key: str, openrouter_key: str, order: str) -> None:
+    def _save_api_config(self, window: tk.Toplevel, gemini_key: str, openrouter_key: str, order: str, gemini_model: str, openrouter_model: str, local_model: str, local_url: str) -> None:
         try:
             values = dict(os.environ)
-            values.update({"GEMINI_API_KEY": gemini_key.strip(), "OPENROUTER_API_KEY": openrouter_key.strip(), "JARVIS_PROVIDER_ORDER": order.strip()})
+            values.update({"GEMINI_API_KEY": gemini_key.strip(), "OPENROUTER_API_KEY": openrouter_key.strip(), "JARVIS_PROVIDER_ORDER": order.strip(), "GEMINI_MODEL": gemini_model.strip(), "OPENROUTER_MODEL": openrouter_model.strip(), "JARVIS_LOCAL_MODEL": local_model.strip(), "JARVIS_LOCAL_BASE_URL": local_url.strip()})
             new_settings = Settings.from_env(values)
-            write_local_env(gemini_key.strip(), openrouter_key.strip(), order.strip())
-            os.environ.update({"GEMINI_API_KEY": gemini_key.strip(), "OPENROUTER_API_KEY": openrouter_key.strip(), "JARVIS_PROVIDER_ORDER": order.strip()})
+            write_local_env(gemini_key.strip(), openrouter_key.strip(), order.strip(), gemini_model.strip(), openrouter_model.strip(), local_model.strip(), local_url.strip())
+            os.environ.update({"GEMINI_API_KEY": gemini_key.strip(), "OPENROUTER_API_KEY": openrouter_key.strip(), "JARVIS_PROVIDER_ORDER": order.strip(), "GEMINI_MODEL": gemini_model.strip(), "OPENROUTER_MODEL": openrouter_model.strip(), "JARVIS_LOCAL_MODEL": local_model.strip(), "JARVIS_LOCAL_BASE_URL": local_url.strip()})
             self.settings = new_settings
             self.router, self.dispatcher, self.registry = self._build_runtime()
             self.connection_label.configure(text="●  CONFIGURED", fg=COLORS["green"])

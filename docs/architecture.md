@@ -63,6 +63,8 @@ Long-term memory composes the explicit SQLite `memories` table with a separate S
 
 The desktop Memory Management panel uses the same `LongTermMemory` facade as the agent tools. It loads recent records asynchronously, supports semantic and lexical search, displays similarity and per-record vector presence, and refreshes after reindex or deletion. Deletion is a UI confirmation flow followed by a synchronized record/vector removal; the Tkinter event queue receives worker results so SQLite operations do not freeze the HUD.
 
+Local model switching is provider-neutral at the router boundary. `Settings` validates model identifiers, accepts a unique fallback order from `local`, `gemini`, and `openrouter`, and rejects non-loopback local endpoints. `LocalLLMClient` reuses the OpenAI-compatible request translation against a localhost-only chat-completions endpoint, making it suitable for Ollama-style servers without sending keys or prompts to a remote endpoint. The settings panel writes the provider fields to the local `.env`, rebuilds the router, and preserves masked key presentation; failed provider requests continue through the configured order.
+
 ## Current implemented slice
 
 The current branch includes a SQLite memory store, a scoped filesystem adapter, and an allowlisted application controller in addition to the original LLM router and dispatcher. Memory operations are explicit: notes and facts are written only through registered tools, recall is bounded, and forgetting a memory is sensitive. File operations require configured roots, enforce size limits, reject binary reads, and expose deletion only as a Recycle Bin move. Application control accepts configured executable paths only and fails closed on non-Windows hosts.
