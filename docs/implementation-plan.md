@@ -198,7 +198,7 @@ SimilarWeb results are informational and should not cause actions automatically.
 
 Add Google Calendar and Gmail only after the core safety model is stable. Gmail integration will be draft-only by default and will never auto-send. Calendar creation or modification will show the exact event details before confirmation when appropriate.
 
-Add optional local speech-to-text through `faster-whisper` and local or configured text-to-speech through `pyttsx3` or `edge-tts`. Voice input will feed the same text command pipeline and will not receive weaker safety rules. Include push-to-talk or explicit activation to avoid unintended capture.
+Add bounded Gemini STT/TTS voice through in-memory audio payloads. Voice input will feed the same text command pipeline and will not receive weaker safety rules. Include push-to-talk or explicit normal-talk activation to avoid unintended capture; do not persist microphone audio or ship a local speech model.
 
 ## User Experience
 

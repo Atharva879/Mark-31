@@ -1298,7 +1298,7 @@ def run_cli() -> None:
             print(f"Registered tools: {len(registry.all())}")
             print(f"Providers: {', '.join(router.settings.provider_order)}")
             print(
-                f"Models: local={router.settings.local_model}, gemini={router.settings.gemini_model}, openrouter={router.settings.openrouter_model}"
+                f"Models: gemini={router.settings.gemini_model}, openrouter={router.settings.openrouter_model}"
             )
             print(f"Audit log: {router.settings.audit_log_path}")
             print(f"Memory database: {router.settings.memory_db_path}")

@@ -37,6 +37,7 @@ from memory.long_term import LongTermMemory
 from presence import PresenceEngine, PresenceLimits, PresenceStore
 from ui_config import write_local_env
 from visual_presence import VisualObserver
+from native_glass import apply_native_glass
 
 try:
     import psutil
@@ -66,28 +67,148 @@ COLORS = {
 }
 
 
-class GlassButton(tk.Button):
-    """Borderless glass-style action control with a tactile hover state."""
+class GlassButton(tk.Canvas):
+    """Rounded canvas control with a layered glass surface and hover glow."""
 
     def __init__(self, master=None, **kwargs):
         kwargs.pop("style", None)
-        kwargs.setdefault("relief", "flat")
+        self._label = kwargs.pop("text", "")
+        self._command = kwargs.pop("command", None)
+        self._state = kwargs.pop("state", "normal")
+        self._font = kwargs.pop("font", ("Segoe UI", 9, "bold"))
+        kwargs.pop("background", None)
+        kwargs.pop("foreground", None)
+        kwargs.pop("activebackground", None)
+        kwargs.pop("activeforeground", None)
+        kwargs.pop("disabledforeground", None)
+        kwargs.setdefault("width", 160)
+        kwargs.setdefault("height", 38)
+        kwargs.setdefault("highlightthickness", 0)
         kwargs.setdefault("bd", 0)
-        kwargs.setdefault("highlightthickness", 1)
-        kwargs.setdefault("highlightbackground", COLORS["glass_edge"])
-        kwargs.setdefault("highlightcolor", COLORS["glass_highlight"])
-        kwargs.setdefault("background", COLORS["glass_alt"])
-        kwargs.setdefault("foreground", COLORS["cyan"])
-        kwargs.setdefault("activebackground", COLORS["bg_glow"])
-        kwargs.setdefault("activeforeground", COLORS["text"])
-        kwargs.setdefault("disabledforeground", COLORS["muted"])
         kwargs.setdefault("cursor", "hand2")
-        kwargs.setdefault("padx", 13)
-        kwargs.setdefault("pady", 8)
-        kwargs.setdefault("font", ("Segoe UI", 9, "bold"))
-        super().__init__(master, **kwargs)
-        self.bind("<Enter>", lambda _event: self.configure(background=COLORS["bg_glow"]))
-        self.bind("<Leave>", lambda _event: self.configure(background=COLORS["glass_alt"]))
+        super().__init__(master, bg=COLORS["glass_deep"], **kwargs)
+        self._hovered = False
+        self.bind("<Configure>", lambda _event: self._redraw())
+        self.bind("<Enter>", self._enter)
+        self.bind("<Leave>", self._leave)
+        self.bind("<Button-1>", self._invoke)
+        self._redraw()
+
+    def configure(self, cnf=None, **kwargs):
+        if cnf:
+            kwargs.update(cnf)
+        if "text" in kwargs:
+            self._label = kwargs.pop("text")
+        if "state" in kwargs:
+            self._state = kwargs.pop("state")
+            self.configure(cursor="" if self._state == "disabled" else "hand2")
+        if "font" in kwargs:
+            self._font = kwargs.pop("font")
+        result = super().configure(**kwargs)
+        self._redraw()
+        return result
+
+    config = configure
+
+    def _enter(self, _event=None):
+        self._hovered = True
+        self._redraw()
+
+    def _leave(self, _event=None):
+        self._hovered = False
+        self._redraw()
+
+    def _invoke(self, _event=None):
+        if self._state != "disabled" and self._command:
+            self._command()
+
+    def _redraw(self):
+        if not self.winfo_exists():
+            return
+        self.delete("all")
+        width = max(self.winfo_width(), 80)
+        height = max(self.winfo_height(), 38)
+        pad = 2
+        radius = min(12, height // 3)
+        surface = COLORS["bg_glow"] if self._hovered else COLORS["glass_alt"]
+        if self._state == "disabled":
+            surface = COLORS["glass_deep"]
+        outline = COLORS["glass_highlight"] if self._hovered else COLORS["glass_edge"]
+        if self._state == "disabled":
+            outline = COLORS["glass_edge"]
+        self._rounded_surface(pad, pad, width - pad, height - pad, radius, surface, outline)
+        self.create_line(
+            pad + radius, pad + 2, width - pad - radius, pad + 2, fill="#4d91aa", width=1
+        )
+        self.create_text(
+            width / 2,
+            height / 2 + 1,
+            text=self._label,
+            fill=COLORS["muted"] if self._state == "disabled" else COLORS["text"],
+            font=self._font,
+        )
+
+    def _rounded_surface(self, x1, y1, x2, y2, radius, fill, outline):
+        self.create_rectangle(x1 + radius, y1, x2 - radius, y2, fill=fill, outline="")
+        self.create_rectangle(x1, y1 + radius, x2, y2 - radius, fill=fill, outline="")
+        for box, start in (
+            ((x1, y1, x1 + 2 * radius, y1 + 2 * radius), 90),
+            ((x2 - 2 * radius, y1, x2, y1 + 2 * radius), 0),
+            ((x2 - 2 * radius, y2 - 2 * radius, x2, y2), 270),
+            ((x1, y2 - 2 * radius, x1 + 2 * radius, y2), 180),
+        ):
+            self.create_arc(*box, start=start, extent=90, style="pieslice", fill=fill, outline="")
+        self.create_line(x1 + radius, y1, x2 - radius, y1, fill=outline)
+        self.create_line(x1 + radius, y2, x2 - radius, y2, fill=outline)
+        self.create_line(x1, y1 + radius, x1, y2 - radius, fill=outline)
+        self.create_line(x2, y1 + radius, x2, y2 - radius, fill=outline)
+        for box, start in (
+            ((x1, y1, x1 + 2 * radius, y1 + 2 * radius), 90),
+            ((x2 - 2 * radius, y1, x2, y1 + 2 * radius), 0),
+            ((x2 - 2 * radius, y2 - 2 * radius, x2, y2), 270),
+            ((x1, y2 - 2 * radius, x1 + 2 * radius, y2), 180),
+        ):
+            self.create_arc(*box, start=start, extent=90, style="arc", outline=outline)
+
+
+class GlassCard(tk.Frame):
+    """Rounded card container with an inset content surface."""
+
+    def __init__(self, master=None, **kwargs):
+        super().__init__(master, bg=COLORS["bg"], bd=0, highlightthickness=0, **kwargs)
+        self.surface = tk.Canvas(self, bg=COLORS["bg"], highlightthickness=0, bd=0)
+        self.surface.place(x=0, y=0, relwidth=1, relheight=1)
+        self.body = tk.Frame(self, bg=COLORS["glass"])
+        self.body.place(x=8, y=8, relwidth=1, relheight=1, width=-16, height=-16)
+        self.bind("<Configure>", lambda _event: self._redraw())
+        self._redraw()
+
+    def _redraw(self):
+        if not self.winfo_exists():
+            return
+        self.surface.delete("all")
+        width = max(self.winfo_width(), 20)
+        height = max(self.winfo_height(), 20)
+        radius = min(18, height // 5, width // 5)
+        self.surface.create_rectangle(
+            radius, 1, width - radius, height - 1, fill=COLORS["glass"], outline=""
+        )
+        self.surface.create_rectangle(
+            1, radius, width - 1, height - radius, fill=COLORS["glass"], outline=""
+        )
+        for box, start in (
+            ((1, 1, 1 + 2 * radius, 1 + 2 * radius), 90),
+            ((width - 1 - 2 * radius, 1, width - 1, 1 + 2 * radius), 0),
+            ((width - 1 - 2 * radius, height - 1 - 2 * radius, width - 1, height - 1), 270),
+            ((1, height - 1 - 2 * radius, 1 + 2 * radius, height - 1), 180),
+        ):
+            self.surface.create_arc(
+                *box, start=start, extent=90, style="pieslice", fill=COLORS["glass"], outline=""
+            )
+        self.surface.create_line(radius, 1, width - radius, 1, fill=COLORS["glass_highlight"])
+        self.surface.create_line(
+            radius, height - 1, width - radius, height - 1, fill=COLORS["glass_deep"]
+        )
 
 
 class JarvisApp(tk.Tk):
@@ -97,6 +218,7 @@ class JarvisApp(tk.Tk):
         self.geometry("1240x820")
         self.minsize(1040, 700)
         self.configure(bg=COLORS["bg"])
+        apply_native_glass(self)
         self.tk.call("tk", "scaling", 1.25)
         self.protocol("WM_DELETE_WINDOW", self._close)
         self.chat_mode = False
@@ -601,10 +723,9 @@ class JarvisApp(tk.Tk):
         for column in range(3):
             actions.grid_columnconfigure(column, weight=1)
 
-    def _panel(self, parent: tk.Misc, title: str) -> tk.Frame:
-        frame = tk.Frame(parent, bg=COLORS["glass"], bd=0, highlightthickness=0)
-        tk.Frame(frame, bg=COLORS["glass_highlight"], height=1).pack(fill="x", padx=12)
-        tk.Frame(frame, bg=COLORS["glass_deep"], height=1).pack(fill="x", padx=12)
+    def _panel(self, parent: tk.Misc, title: str) -> tuple[GlassCard, tk.Frame]:
+        card = GlassCard(parent)
+        frame = card.body
         tk.Label(
             frame,
             text=title,
@@ -613,12 +734,12 @@ class JarvisApp(tk.Tk):
             font=("Cascadia Mono", 10, "bold"),
             anchor="w",
         ).pack(fill="x", padx=16, pady=(14, 12))
-        return frame
+        return card, frame
 
     def _build_left_telemetry(self) -> None:
-        panel = self._panel(self, "SYSTEM TELEMETRY")
-        panel.grid(row=1, column=0, sticky="nsew", padx=(26, 10), pady=8)
-        panel.configure(width=245)
+        card, panel = self._panel(self, "SYSTEM TELEMETRY")
+        card.grid(row=1, column=0, sticky="nsew", padx=(26, 10), pady=8)
+        card.configure(width=245)
         panel.pack_propagate(False)
         self.telemetry_values: dict[str, tk.Label] = {}
         self.telemetry_bars: dict[str, ttk.Progressbar] = {}
@@ -681,8 +802,9 @@ class JarvisApp(tk.Tk):
         ).pack(side="right")
 
     def _build_center_hud(self) -> None:
-        panel = tk.Frame(self, bg=COLORS["glass_deep"], bd=0, highlightthickness=1, highlightbackground=COLORS["glass_edge"])
-        panel.grid(row=1, column=1, sticky="nsew", padx=10, pady=8)
+        card = GlassCard(self)
+        panel = card.body
+        card.grid(row=1, column=1, sticky="nsew", padx=10, pady=8)
         panel.grid_rowconfigure(0, weight=1)
         panel.grid_columnconfigure(0, weight=1)
         self.hud = tk.Canvas(panel, bg=COLORS["glass_deep"], highlightthickness=0, bd=0)
@@ -817,9 +939,9 @@ class JarvisApp(tk.Tk):
             )
 
     def _build_right_console(self) -> None:
-        panel = self._panel(self, "ACTIVITY FEED")
-        panel.grid(row=1, column=2, sticky="nsew", padx=(10, 26), pady=8)
-        panel.configure(width=360)
+        card, panel = self._panel(self, "ACTIVITY FEED")
+        card.grid(row=1, column=2, sticky="nsew", padx=(10, 26), pady=8)
+        card.configure(width=360)
         panel.pack_propagate(False)
         self.activity = ScrolledText(
             panel,
@@ -856,7 +978,13 @@ class JarvisApp(tk.Tk):
         ).pack(anchor="w", padx=16, pady=(0, 14))
 
     def _build_footer(self) -> None:
-        footer = tk.Frame(self, bg=COLORS["glass_deep"], bd=0, highlightthickness=1, highlightbackground=COLORS["glass_edge"])
+        footer = tk.Frame(
+            self,
+            bg=COLORS["glass_deep"],
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=COLORS["glass_edge"],
+        )
         footer.grid(row=2, column=0, columnspan=3, sticky="ew", padx=26, pady=(0, 18))
         footer.grid_columnconfigure(0, weight=1)
         self.footer_status = tk.Label(
@@ -1399,6 +1527,7 @@ class JarvisApp(tk.Tk):
         self.chat_mode = True
         self.chat_mode_button.configure(text="DISABLE CHAT MODE")
         self.chat_window = tk.Toplevel(self)
+        apply_native_glass(self.chat_window)
         self.chat_window.title("JARVIS // CHAT MODE")
         self.chat_window.configure(bg=COLORS["bg"])
         self.chat_window.geometry("660x560")
@@ -1553,6 +1682,7 @@ class JarvisApp(tk.Tk):
             self._monitor_refresh()
             return
         window = tk.Toplevel(self)
+        apply_native_glass(window)
         self.monitor_window = window
         window.title("JARVIS // MONITORS AND SCHEDULES")
         window.configure(bg=COLORS["bg"])
@@ -1868,6 +1998,7 @@ class JarvisApp(tk.Tk):
             self.workflow_window.lift()
             return
         window = tk.Toplevel(self)
+        apply_native_glass(window)
         self.workflow_window = window
         window.title("JARVIS // ROUTINES")
         window.configure(bg=COLORS["bg"])
@@ -2051,6 +2182,7 @@ class JarvisApp(tk.Tk):
             self.permission_window.lift()
             return
         window = tk.Toplevel(self)
+        apply_native_glass(window)
         self.permission_window = window
         window.title("JARVIS // PERMISSIONS")
         window.configure(bg=COLORS["bg"])
@@ -2186,6 +2318,7 @@ class JarvisApp(tk.Tk):
             self.notification_window.lift()
             return
         window = tk.Toplevel(self)
+        apply_native_glass(window)
         self.notification_window = window
         window.title("JARVIS // ALERT HISTORY")
         window.configure(bg=COLORS["bg"])
@@ -2267,6 +2400,7 @@ class JarvisApp(tk.Tk):
             self.context_window.lift()
             return
         window = tk.Toplevel(self)
+        apply_native_glass(window)
         self.context_window = window
         window.title("JARVIS // CONTEXT & PERSONALITY")
         window.configure(bg=COLORS["bg"])
@@ -2454,6 +2588,7 @@ class JarvisApp(tk.Tk):
             self.memory_window.lift()
             return
         window = tk.Toplevel(self)
+        apply_native_glass(window)
         self.memory_window = window
         window.title("JARVIS // MEMORY MANAGEMENT")
         window.configure(bg=COLORS["bg"])
@@ -2696,6 +2831,7 @@ class JarvisApp(tk.Tk):
 
     def _open_api_config(self) -> None:
         window = tk.Toplevel(self)
+        apply_native_glass(window)
         window.title("JARVIS // API CONFIGURATION")
         window.configure(bg=COLORS["bg"])
         window.geometry("680x760")
@@ -2842,7 +2978,9 @@ class JarvisApp(tk.Tk):
             self.settings = new_settings
             self.scheduler.stop()
             self.router, self.dispatcher, self.registry = self._build_runtime()
+            self._register_interactive_browser_tools()
             self.scheduler = self.registry.scheduler
+            self.workflow_engine = self.registry.workflow_engine
             self.scheduler.start()
             self.connection_label.configure(text="●  CONFIGURED", fg=COLORS["green"])
             self._write_log(
