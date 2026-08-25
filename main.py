@@ -13,6 +13,7 @@ from config import Settings
 from dispatcher import Dispatcher, ToolRegistry
 from llm.gemini_client import GeminiClient
 from llm.openrouter_client import OpenRouterClient
+from llm.local_client import LocalLLMClient
 from llm.router import AllProvidersFailed, LLMRouter
 from llm.schemas import RiskTier, ToolSpec
 from memory.long_term import LongTermMemory
@@ -54,6 +55,7 @@ def build_runtime(
     _register_code_sandbox_tool(registry)
 
     providers = {
+        "local": LocalLLMClient(settings.local_model, settings.local_base_url, settings.request_timeout_seconds),
         "gemini": GeminiClient(settings.gemini_api_key, settings.gemini_model, settings.request_timeout_seconds),
         "openrouter": OpenRouterClient(
             settings.openrouter_api_key,
@@ -580,8 +582,10 @@ def run_cli() -> None:
         if command.lower() == "diagnostics":
             print(f"Registered tools: {len(registry.all())}")
             print(f"Providers: {', '.join(router.settings.provider_order)}")
+            print(f"Models: local={router.settings.local_model}, gemini={router.settings.gemini_model}, openrouter={router.settings.openrouter_model}")
             print(f"Audit log: {router.settings.audit_log_path}")
             print(f"Memory database: {router.settings.memory_db_path}")
+            print(f"Vector database: {router.settings.vector_db_path}")
             continue
         if not command:
             continue

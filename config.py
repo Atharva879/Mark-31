@@ -7,6 +7,7 @@ routing core can be imported before optional Windows integrations are installed.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -17,6 +18,8 @@ class Settings:
 
     gemini_api_key: str = ""
     openrouter_api_key: str = ""
+    local_model: str = "llama3.2"
+    local_base_url: str = "http://127.0.0.1:11434/v1/chat/completions"
     gemini_model: str = "gemini-2.0-flash"
     openrouter_model: str = "deepseek/deepseek-chat-v3.1:free"
     provider_order: tuple[str, ...] = ("gemini", "openrouter")
@@ -38,8 +41,8 @@ class Settings:
             for item in env.get("JARVIS_PROVIDER_ORDER", "gemini,openrouter").split(",")
             if item.strip()
         )
-        if not order or any(item not in {"gemini", "openrouter"} for item in order):
-            raise ValueError("JARVIS_PROVIDER_ORDER must contain only gemini and openrouter")
+        if not order or len(set(order)) != len(order) or any(item not in {"local", "gemini", "openrouter"} for item in order):
+            raise ValueError("JARVIS_PROVIDER_ORDER must contain unique values from local, gemini, and openrouter")
 
         timeout = _positive_float(env.get("JARVIS_REQUEST_TIMEOUT_SECONDS", "30"), "timeout")
         retries = _nonnegative_int(env.get("JARVIS_MAX_RETRIES_PER_PROVIDER", "1"), "retries")
@@ -52,10 +55,12 @@ class Settings:
         return cls(
             gemini_api_key=env.get("GEMINI_API_KEY", "").strip(),
             openrouter_api_key=env.get("OPENROUTER_API_KEY", "").strip(),
-            gemini_model=env.get("GEMINI_MODEL", "gemini-2.0-flash").strip(),
-            openrouter_model=env.get(
-                "OPENROUTER_MODEL", "deepseek/deepseek-chat-v3.1:free"
-            ).strip(),
+            local_model=_model_name(env.get("JARVIS_LOCAL_MODEL", "llama3.2"), "JARVIS_LOCAL_MODEL"),
+            local_base_url=_local_url(env.get("JARVIS_LOCAL_BASE_URL", "http://127.0.0.1:11434/v1/chat/completions")),
+            gemini_model=_model_name(env.get("GEMINI_MODEL", "gemini-2.0-flash"), "GEMINI_MODEL"),
+            openrouter_model=_model_name(
+                env.get("OPENROUTER_MODEL", "deepseek/deepseek-chat-v3.1:free"), "OPENROUTER_MODEL"
+            ),
             provider_order=order,
             request_timeout_seconds=timeout,
             max_retries_per_provider=retries,
@@ -67,6 +72,23 @@ class Settings:
             vector_db_path=Path(env.get("JARVIS_VECTOR_DB", "memory/memory.vectors.db")).expanduser(),
             allowed_roots=roots,
         )
+
+
+def _model_name(value: str, label: str) -> str:
+    value = value.strip()
+    if not value or len(value) > 200 or not re.fullmatch(r"[A-Za-z0-9._:/-]+", value):
+        raise ValueError(f"{label} must be a safe model identifier")
+    return value
+
+
+def _local_url(value: str) -> str:
+    from urllib.parse import urlparse
+    parsed = urlparse(value.strip())
+    if parsed.scheme != "http" or parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+        raise ValueError("JARVIS_LOCAL_BASE_URL must be an HTTP localhost endpoint")
+    if not parsed.path.endswith("/chat/completions"):
+        raise ValueError("JARVIS_LOCAL_BASE_URL must target an OpenAI-compatible chat completions endpoint")
+    return parsed.geturl()
 
 
 def _positive_float(value: str, label: str) -> float:
