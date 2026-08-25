@@ -31,6 +31,7 @@ from skills.multimodal import MultimodalIngestor
 from skills.shell import SafeCommandExecutor
 from skills.web import WebClient
 from scheduler import BackgroundScheduler, SchedulerStore
+from workflows import SafeWorkflowEngine, WorkflowStep, WorkflowStore
 
 
 def build_runtime(
@@ -60,6 +61,10 @@ def build_runtime(
     personal_store = PersonalStore(Path(os.environ.get("JARVIS_PERSONAL_DB", "memory/personal.db")))
     calendar_path = _configured_calendar_path(settings)
     _register_personal_tools(registry, personal_store, ICalendarReader(calendar_path))
+
+    workflow_store = WorkflowStore(
+        Path(os.environ.get("JARVIS_WORKFLOW_DB", "memory/workflows.db"))
+    )
 
     monitor_web = _build_web_client()
     monitor_files = ScopedFileManager(settings.allowed_roots) if settings.allowed_roots else None
@@ -133,7 +138,10 @@ def build_runtime(
         )
     )
     _register_scheduler_tools(registry, scheduler)
+    workflow_engine = SafeWorkflowEngine(workflow_store, registry, dispatcher)
+    _register_workflow_tools(registry, workflow_store, workflow_engine)
     registry.scheduler = scheduler
+    registry.workflow_engine = workflow_engine
     return router, dispatcher, registry
 
 
@@ -253,6 +261,97 @@ def _register_personal_tools(
             },
             risk=RiskTier.SAFE,
             handler=store.list_email_drafts,
+        )
+    )
+
+
+def _register_workflow_tools(
+    registry: ToolRegistry, store: WorkflowStore, engine: SafeWorkflowEngine
+) -> None:
+    registry.register(
+        ToolSpec(
+            name="create_safe_workflow",
+            description="Create a bounded routine from registered SAFE tools only.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "maxLength": 120},
+                    "steps": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 10,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "tool_name": {"type": "string", "maxLength": 100},
+                                "arguments": {"type": "object"},
+                            },
+                            "required": ["tool_name", "arguments"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["name", "steps"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.MODERATE,
+            handler=lambda name, steps: store.create(
+                name, [WorkflowStep(item["tool_name"], item["arguments"]) for item in steps]
+            ),
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="list_safe_workflows",
+            description="List saved safe workflows without executing them.",
+            parameters={"type": "object", "properties": {}, "additionalProperties": False},
+            risk=RiskTier.SAFE,
+            handler=store.list,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="preview_safe_workflow",
+            description="Preview the registered safe steps of a workflow without executing them.",
+            parameters={
+                "type": "object",
+                "properties": {"workflow_id": {"type": "string", "maxLength": 80}},
+                "required": ["workflow_id"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.SAFE,
+            handler=engine.preview,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="run_safe_workflow",
+            description="Run a saved workflow containing SAFE registered tools only.",
+            parameters={
+                "type": "object",
+                "properties": {"workflow_id": {"type": "string", "maxLength": 80}},
+                "required": ["workflow_id"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.MODERATE,
+            handler=engine.run,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="set_safe_workflow_enabled",
+            description="Enable or disable a saved safe workflow.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "workflow_id": {"type": "string", "maxLength": 80},
+                    "enabled": {"type": "boolean"},
+                },
+                "required": ["workflow_id", "enabled"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.MODERATE,
+            handler=store.set_enabled,
         )
     )
 

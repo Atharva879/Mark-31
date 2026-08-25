@@ -71,6 +71,7 @@ class JarvisApp(tk.Tk):
         self.context_window: tk.Toplevel | None = None
         self.notification_window: tk.Toplevel | None = None
         self.permission_window: tk.Toplevel | None = None
+        self.workflow_window: tk.Toplevel | None = None
         self.memory_records: list[dict[str, object]] = []
         self.permission_records = []
 
@@ -103,6 +104,7 @@ class JarvisApp(tk.Tk):
         self.memory = LongTermMemory(self.settings.memory_db_path, self.settings.vector_db_path)
         self.router, self.dispatcher, self.registry = self._build_runtime()
         self.scheduler = self.registry.scheduler
+        self.workflow_engine = self.registry.workflow_engine
         self.screen = ScreenCapture(
             timeout_seconds=float(os.environ.get("JARVIS_SCREEN_TIMEOUT_SECONDS", "60"))
         )
@@ -330,6 +332,12 @@ class JarvisApp(tk.Tk):
             text="PERMISSIONS",
             style="Jarvis.TButton",
             command=self._open_permissions_manager,
+        ).pack(side="left", padx=(0, 8))
+        ttk.Button(
+            actions,
+            text="ROUTINES",
+            style="Jarvis.TButton",
+            command=self._open_workflow_manager,
         ).pack(side="left", padx=(0, 8))
         ttk.Button(
             actions, text="API CONFIG", style="Jarvis.TButton", command=self._open_api_config
@@ -1556,6 +1564,122 @@ class JarvisApp(tk.Tk):
         if result.error:
             messagebox.showerror("Delete monitor", result.error, parent=self.monitor_window)
         self._monitor_refresh()
+
+    def _open_workflow_manager(self) -> None:
+        if self.workflow_window is not None and self.workflow_window.winfo_exists():
+            self.workflow_window.deiconify()
+            self.workflow_window.lift()
+            return
+        window = tk.Toplevel(self)
+        self.workflow_window = window
+        window.title("JARVIS // ROUTINES")
+        window.configure(bg=COLORS["bg"])
+        window.geometry("820x560")
+        window.minsize(680, 420)
+        window.transient(self)
+        window.protocol("WM_DELETE_WINDOW", self._close_workflow_manager)
+        tk.Label(
+            window,
+            text="SAFE ROUTINES",
+            bg=COLORS["bg"],
+            fg=COLORS["cyan"],
+            font=("Segoe UI", 19, "bold"),
+        ).pack(anchor="w", padx=24, pady=(22, 3))
+        tk.Label(
+            window,
+            text="Only registered SAFE tools can run. Preview before execution; sensitive tools are rejected.",
+            bg=COLORS["bg"],
+            fg=COLORS["muted"],
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", padx=24, pady=(0, 16))
+        frame = tk.Frame(
+            window, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1
+        )
+        frame.pack(fill="both", expand=True, padx=24, pady=(0, 14))
+        self.workflow_list = tk.Listbox(
+            frame,
+            bg="#07111d",
+            fg=COLORS["text"],
+            selectbackground="#16405a",
+            relief="flat",
+            font=("Cascadia Mono", 9),
+            activestyle="none",
+        )
+        self.workflow_list.pack(fill="both", expand=True, padx=12, pady=12)
+        footer = tk.Frame(window, bg=COLORS["bg"])
+        footer.pack(fill="x", padx=24, pady=(0, 20))
+        self.workflow_status_label = tk.Label(
+            footer, text="", bg=COLORS["bg"], fg=COLORS["muted"], font=("Cascadia Mono", 8)
+        )
+        self.workflow_status_label.pack(side="left")
+        ttk.Button(
+            footer, text="PREVIEW", style="Jarvis.TButton", command=self._preview_selected_workflow
+        ).pack(side="right", padx=(8, 0))
+        ttk.Button(
+            footer, text="RUN SAFE", style="Jarvis.TButton", command=self._run_selected_workflow
+        ).pack(side="right", padx=(8, 0))
+        ttk.Button(
+            footer, text="REFRESH", style="Jarvis.TButton", command=self._refresh_workflows
+        ).pack(side="right", padx=(8, 0))
+        ttk.Button(
+            footer, text="CLOSE", style="Jarvis.TButton", command=self._close_workflow_manager
+        ).pack(side="right")
+        self._refresh_workflows()
+
+    def _close_workflow_manager(self) -> None:
+        if self.workflow_window is not None and self.workflow_window.winfo_exists():
+            self.workflow_window.destroy()
+        self.workflow_window = None
+
+    def _refresh_workflows(self) -> None:
+        if self.workflow_window is None or not self.workflow_window.winfo_exists():
+            return
+        self.workflow_list.delete(0, "end")
+        self.workflow_records = self.workflow_engine.store.list()
+        for workflow in self.workflow_records:
+            state = "ON" if workflow.enabled else "OFF"
+            self.workflow_list.insert(
+                "end",
+                f"{workflow.name}  |  {workflow.workflow_id}  |  {state}  |  {len(workflow.steps)} steps",
+            )
+        self.workflow_status_label.configure(
+            text=f"{len(self.workflow_records)} saved SAFE-only routines."
+        )
+
+    def _selected_workflow(self):
+        selection = self.workflow_list.curselection() if hasattr(self, "workflow_list") else ()
+        if not selection or selection[0] >= len(self.workflow_records):
+            return None
+        return self.workflow_records[selection[0]]
+
+    def _preview_selected_workflow(self) -> None:
+        workflow = self._selected_workflow()
+        if workflow is None:
+            return
+        steps = self.workflow_engine.preview(workflow.workflow_id)
+        messagebox.showinfo(
+            "Routine preview",
+            "\n".join(f"{item['step']}. {item['tool']}" for item in steps),
+            parent=self.workflow_window,
+        )
+
+    def _run_selected_workflow(self) -> None:
+        workflow = self._selected_workflow()
+        if workflow is None:
+            return
+        if not messagebox.askyesno(
+            "Run routine", f"Run SAFE routine '{workflow.name}'?", parent=self.workflow_window
+        ):
+            return
+        try:
+            self.workflow_engine.run(workflow.workflow_id)
+            self.workflow_status_label.configure(
+                text=f"Completed: {workflow.name}", fg=COLORS["green"]
+            )
+        except Exception as exc:
+            self.workflow_status_label.configure(
+                text=f"Routine failed: {type(exc).__name__}", fg=COLORS["red"]
+            )
 
     def _open_permissions_manager(self) -> None:
         if self.permission_window is not None and self.permission_window.winfo_exists():
