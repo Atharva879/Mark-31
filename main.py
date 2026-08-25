@@ -18,6 +18,7 @@ from llm.schemas import RiskTier, ToolSpec
 from memory.store import MemoryStore
 from skills.apps import AppConfig, ApplicationController
 from skills.browser import ReadOnlyBrowser
+from skills.code_sandbox import CodeSandbox
 from skills.files import ScopedFileManager
 from skills.messaging_discord import DiscordClient
 from skills.messaging_whatsapp import WhatsAppDesktopClient
@@ -45,6 +46,8 @@ def build_runtime(settings: Settings | None = None) -> tuple[LLMRouter, Dispatch
     _register_multimodal_tools(registry, settings)
     _register_shell_tools(registry, settings)
     _register_browser_tools(registry)
+    _register_advanced_file_tools(registry, settings)
+    _register_code_sandbox_tool(registry)
 
     providers = {
         "gemini": GeminiClient(settings.gemini_api_key, settings.gemini_model, settings.request_timeout_seconds),
@@ -238,6 +241,97 @@ def _register_discord_tools(registry: ToolRegistry) -> None:
             },
             risk=RiskTier.MODERATE,
             handler=client.send_message,
+        )
+    )
+
+
+def _register_advanced_file_tools(registry: ToolRegistry, settings: Settings) -> None:
+    if not settings.allowed_roots:
+        return
+    files = ScopedFileManager(settings.allowed_roots)
+    registry.register(
+        ToolSpec(
+            name="find_files",
+            description="Recursively find files under configured roots by a bounded glob pattern.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "maxLength": 200},
+                    "directory": {"type": "string", "maxLength": 2_000},
+                    "max_results": {"type": "integer", "minimum": 1, "maximum": 1_000},
+                },
+                "additionalProperties": False,
+            },
+            risk=RiskTier.SAFE,
+            handler=lambda query="*", directory=".", max_results=100: files.find_files(query, directory, max_results),
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="file_metadata",
+            description="Return metadata for an allowed local file or directory.",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string", "maxLength": 2_000}},
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.SAFE,
+            handler=files.metadata,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="hash_file_sha256",
+            description="Calculate a bounded SHA-256 hash for an allowed local file.",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string", "maxLength": 2_000}},
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.SAFE,
+            handler=files.sha256,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="inspect_archive",
+            description="List ZIP or TAR-family archive members without extracting or executing them.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "maxLength": 2_000},
+                    "max_entries": {"type": "integer", "minimum": 1, "maximum": 2_000},
+                },
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.SAFE,
+            handler=lambda path, max_entries=200: files.inspect_archive(path, max_entries),
+        )
+    )
+
+
+def _register_code_sandbox_tool(registry: ToolRegistry) -> None:
+    sandbox = CodeSandbox(
+        timeout_seconds=float(os.environ.get("JARVIS_SANDBOX_TIMEOUT_SECONDS", "5")),
+        max_output_chars=int(os.environ.get("JARVIS_SANDBOX_MAX_OUTPUT_CHARS", "12000")),
+        max_code_chars=int(os.environ.get("JARVIS_SANDBOX_MAX_CODE_CHARS", "8000")),
+        memory_limit_mb=int(os.environ.get("JARVIS_SANDBOX_MEMORY_LIMIT_MB", "256")),
+    )
+    registry.register(
+        ToolSpec(
+            name="run_python_sandbox",
+            description="Run small pure Python calculations in an isolated temporary subprocess; confirmation is always required.",
+            parameters={
+                "type": "object",
+                "properties": {"code": {"type": "string", "maxLength": 8_000}},
+                "required": ["code"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.SENSITIVE,
+            handler=sandbox.execute,
         )
     )
 
