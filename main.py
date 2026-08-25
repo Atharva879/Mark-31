@@ -14,7 +14,6 @@ from config import Settings
 from dispatcher import Dispatcher, ToolRegistry
 from llm.gemini_client import GeminiClient
 from llm.openrouter_client import OpenRouterClient
-from llm.local_client import LocalLLMClient
 from llm.router import AllProvidersFailed, LLMRouter
 from knowledge import KnowledgeStore
 from plugins import PluginCatalog
@@ -100,9 +99,6 @@ def build_runtime(
     )
 
     providers = {
-        "local": LocalLLMClient(
-            settings.local_model, settings.local_base_url, settings.request_timeout_seconds
-        ),
         "gemini": GeminiClient(
             settings.gemini_api_key, settings.gemini_model, settings.request_timeout_seconds
         ),

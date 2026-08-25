@@ -18,7 +18,7 @@ class Settings:
 
     gemini_api_key: str = ""
     openrouter_api_key: str = ""
-    local_model: str = "llama3.2"
+    local_model: str = ""
     local_base_url: str = "http://127.0.0.1:11434/v1/chat/completions"
     gemini_model: str = "gemini-3.6-flash"
     openrouter_model: str = "deepseek/deepseek-chat-v3.1"
@@ -47,10 +47,10 @@ class Settings:
         if (
             not order
             or len(set(order)) != len(order)
-            or any(item not in {"local", "gemini", "openrouter"} for item in order)
+            or any(item not in {"gemini", "openrouter"} for item in order)
         ):
             raise ValueError(
-                "JARVIS_PROVIDER_ORDER must contain unique values from local, gemini, and openrouter"
+                "JARVIS_PROVIDER_ORDER must contain unique values from gemini and openrouter"
             )
 
         timeout = _positive_float(env.get("JARVIS_REQUEST_TIMEOUT_SECONDS", "30"), "timeout")
@@ -73,12 +73,10 @@ class Settings:
         return cls(
             gemini_api_key=env.get("GEMINI_API_KEY", "").strip(),
             openrouter_api_key=env.get("OPENROUTER_API_KEY", "").strip(),
-            local_model=_model_name(
-                env.get("JARVIS_LOCAL_MODEL", "llama3.2"), "JARVIS_LOCAL_MODEL"
-            ),
-            local_base_url=_local_url(
-                env.get("JARVIS_LOCAL_BASE_URL", "http://127.0.0.1:11434/v1/chat/completions")
-            ),
+            local_model=env.get("JARVIS_LOCAL_MODEL", "").strip(),
+            local_base_url=env.get(
+                "JARVIS_LOCAL_BASE_URL", "http://127.0.0.1:11434/v1/chat/completions"
+            ).strip(),
             gemini_model=_model_name(gemini_model, "GEMINI_MODEL"),
             openrouter_model=_model_name(openrouter_model, "OPENROUTER_MODEL"),
             provider_order=order,
