@@ -32,13 +32,20 @@ class GeminiClient:
         if not prompt.strip():
             raise ValueError("Vision prompt cannot be empty")
         body = {
-            "contents": [{
-                "role": "user",
-                "parts": [
-                    {"text": prompt[:4_000]},
-                    {"inline_data": {"mime_type": "image/png", "data": base64.b64encode(png_bytes).decode("ascii")}},
-                ],
-            }]
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {"text": prompt[:4_000]},
+                        {
+                            "inline_data": {
+                                "mime_type": "image/png",
+                                "data": base64.b64encode(png_bytes).decode("ascii"),
+                            }
+                        },
+                    ],
+                }
+            ]
         }
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
@@ -57,7 +64,9 @@ class GeminiClient:
             "contents": [_to_gemini_message(message) for message in messages],
         }
         if tools:
-            body["tools"] = [{"functionDeclarations": [_to_gemini_declaration(tool) for tool in tools]}]
+            body["tools"] = [
+                {"functionDeclarations": [_to_gemini_declaration(tool) for tool in tools]}
+            ]
 
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
@@ -81,12 +90,14 @@ def _to_gemini_message(message: ChatMessage) -> dict[str, Any]:
             response = {"result": message.content}
         return {
             "role": "user",
-            "parts": [{
-                "functionResponse": {
-                    "name": message.name or "tool",
-                    "response": response,
+            "parts": [
+                {
+                    "functionResponse": {
+                        "name": message.name or "tool",
+                        "response": response,
+                    }
                 }
-            }],
+            ],
         }
     return {"role": role, "parts": parts or [{"text": ""}]}
 
@@ -100,11 +111,18 @@ def _to_gemini_declaration(tool: ToolSpec) -> dict[str, Any]:
 
 
 def _gemini_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
-    """Translate common JSON Schema primitive types to Gemini's schema form."""
+    """Translate common JSON Schema forms to Gemini's protobuf schema form."""
     result: dict[str, Any] = {}
     for key, value in schema.items():
-        if key == "type" and isinstance(value, str):
-            result[key] = value.upper()
+        if key == "type":
+            if isinstance(value, str):
+                result[key] = value.upper()
+            elif isinstance(value, list):
+                non_null = [item for item in value if item != "null"]
+                if len(non_null) == 1 and isinstance(non_null[0], str):
+                    result[key] = non_null[0].upper()
+                elif non_null:
+                    result[key] = str(non_null[0]).upper()
         elif key == "properties" and isinstance(value, Mapping):
             result[key] = {name: _gemini_schema(child) for name, child in value.items()}
         elif key == "items" and isinstance(value, Mapping):
@@ -120,7 +138,7 @@ def _parse_response(payload: Mapping[str, Any]) -> LLMResponse:
     candidates = payload.get("candidates") or []
     if not candidates:
         raise RuntimeError("Gemini response did not include a candidate")
-    parts = ((candidates[0].get("content") or {}).get("parts") or [])
+    parts = (candidates[0].get("content") or {}).get("parts") or []
     text_parts: list[str] = []
     calls: list[ToolCall] = []
     for index, part in enumerate(parts):
@@ -135,7 +153,9 @@ def _parse_response(payload: Mapping[str, Any]) -> LLMResponse:
                     arguments=dict(function_call.get("args") or {}),
                 )
             )
-    return LLMResponse(provider="gemini", content="\n".join(text_parts), tool_calls=tuple(calls), raw=payload)
+    return LLMResponse(
+        provider="gemini", content="\n".join(text_parts), tool_calls=tuple(calls), raw=payload
+    )
 
 
 __all__ = ["GeminiClient"]

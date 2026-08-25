@@ -151,8 +151,14 @@ class JarvisApp(tk.Tk):
         self.voice_input = VoiceInput(
             model_size=os.environ.get("JARVIS_WHISPER_MODEL", "base"),
             max_seconds=float(os.environ.get("JARVIS_VOICE_MAX_SECONDS", "10")),
+            gemini_api_key=self.settings.gemini_api_key,
+            gemini_model=os.environ.get("JARVIS_VOICE_INPUT_MODEL", "gemini-3.7-flash"),
         )
-        self.tts = SpeechSynthesizer(rate=int(os.environ.get("JARVIS_TTS_RATE", "175")))
+        self.tts = SpeechSynthesizer(
+            rate=int(os.environ.get("JARVIS_TTS_RATE", "175")),
+            gemini_api_key=self.settings.gemini_api_key,
+            gemini_model=os.environ.get("JARVIS_TTS_MODEL", "gemini-3.1-flash-tts-preview"),
+        )
         self.voice_request_active = False
         self.voice_mode = os.environ.get("JARVIS_VOICE_MODE", "normal_talk").strip().lower()
         if self.voice_mode not in {"push_to_talk", "normal_talk"}:
