@@ -266,6 +266,58 @@ class JarvisApp(tk.Tk):
                 handler=self.interactive_browser.submit,
             )
         )
+        self.registry.register(
+            ToolSpec(
+                name="interactive_browser_list_pages",
+                description="List active Playwright browser tabs.",
+                parameters={"type": "object", "properties": {}, "additionalProperties": False},
+                risk=RiskTier.SENSITIVE,
+                confirmation_required=True,
+                handler=self.interactive_browser.list_pages,
+            )
+        )
+        self.registry.register(
+            ToolSpec(
+                name="interactive_browser_select_page",
+                description="Select an active Playwright browser tab by bounded index.",
+                parameters={
+                    "type": "object",
+                    "properties": {"index": {"type": "integer", "minimum": 0, "maximum": 20}},
+                    "required": ["index"],
+                    "additionalProperties": False,
+                },
+                risk=RiskTier.SENSITIVE,
+                confirmation_required=True,
+                handler=self.interactive_browser.select_page,
+            )
+        )
+        self.registry.register(
+            ToolSpec(
+                name="interactive_browser_scroll",
+                description="Scroll the active Playwright page by a bounded pixel amount.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "pixels": {"type": "integer", "minimum": -3000, "maximum": 3000}
+                    },
+                    "required": ["pixels"],
+                    "additionalProperties": False,
+                },
+                risk=RiskTier.SENSITIVE,
+                confirmation_required=True,
+                handler=self.interactive_browser.scroll,
+            )
+        )
+        self.registry.register(
+            ToolSpec(
+                name="interactive_browser_page_state",
+                description="Inspect bounded text and metadata from the active Playwright page.",
+                parameters={"type": "object", "properties": {}, "additionalProperties": False},
+                risk=RiskTier.SENSITIVE,
+                confirmation_required=True,
+                handler=self.interactive_browser.page_state,
+            )
+        )
 
     def _build_runtime(self):
 
