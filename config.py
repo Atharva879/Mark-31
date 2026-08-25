@@ -33,6 +33,7 @@ class Settings:
     vector_db_path: Path = Path("memory/memory.vectors.db")
     scheduler_db_path: Path = Path("memory/scheduler.db")
     presence_db_path: Path = Path("memory/presence.db")
+    conversation_db_path: Path = Path("memory/conversations.db")
     allowed_roots: tuple[Path, ...] = field(default_factory=tuple)
 
     @classmethod
@@ -74,6 +75,7 @@ class Settings:
             vector_db_path=Path(env.get("JARVIS_VECTOR_DB", "memory/memory.vectors.db")).expanduser(),
             scheduler_db_path=Path(env.get("JARVIS_SCHEDULER_DB", "memory/scheduler.db")).expanduser(),
             presence_db_path=Path(env.get("JARVIS_PRESENCE_DB", "memory/presence.db")).expanduser(),
+            conversation_db_path=Path(env.get("JARVIS_CONVERSATION_DB", "memory/conversations.db")).expanduser(),
             allowed_roots=roots,
         )
 

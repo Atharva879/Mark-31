@@ -18,6 +18,8 @@ from tkinter import messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
 from config import Settings
+from conversation import ConversationStore
+from llm.schemas import ChatMessage
 from main import build_runtime
 from skills.camera import CameraCapture
 from skills.screen import ScreenCapture
@@ -62,9 +64,15 @@ class JarvisApp(tk.Tk):
         self.chat_mode = False
         self.chat_window: tk.Toplevel | None = None
         self.memory_window: tk.Toplevel | None = None
+        self.context_window: tk.Toplevel | None = None
         self.memory_records: list[dict[str, object]] = []
 
         self.settings = Settings.from_env()
+        self.conversation = ConversationStore(
+            self.settings.conversation_db_path,
+            max_turn_chars=int(os.environ.get("JARVIS_CONVERSATION_MAX_TURN_CHARS", "12000")),
+        )
+        self.preferences = self.conversation.get_preferences()
         self.memory = LongTermMemory(self.settings.memory_db_path, self.settings.vector_db_path)
         self.router, self.dispatcher, self.registry = self._build_runtime()
         self.scheduler = self.registry.scheduler
@@ -105,6 +113,7 @@ class JarvisApp(tk.Tk):
         )
         self.presence.mark_activity()
         self.presence_voice_enabled = False
+        self.conversation_lock = threading.RLock()
         self._presence_tick_lock = threading.Lock()
         self._presence_tick_active = False
         self._visual_tick_lock = threading.Lock()
@@ -199,10 +208,12 @@ class JarvisApp(tk.Tk):
         tk.Label(status_cluster, text="●  AGENTS READY", bg=COLORS["bg"], fg=COLORS["green"], font=("Cascadia Mono", 8)).pack(anchor="e", pady=(3, 0))
         tk.Label(status_cluster, text="●  SCHEDULES READY", bg=COLORS["bg"], fg=COLORS["green"], font=("Cascadia Mono", 8)).pack(anchor="e", pady=(3, 0))
         tk.Label(status_cluster, text="●  PRESENCE READY", bg=COLORS["bg"], fg=COLORS["green"], font=("Cascadia Mono", 8)).pack(anchor="e", pady=(3, 0))
+        tk.Label(status_cluster, text="●  MEMORY CONTEXT", bg=COLORS["bg"], fg=COLORS["green"], font=("Cascadia Mono", 8)).pack(anchor="e", pady=(3, 0))
         actions = tk.Frame(header, bg=COLORS["bg"])
         actions.grid(row=0, column=2, rowspan=2, sticky="e")
         ttk.Button(actions, text="MONITORS", style="Jarvis.TButton", command=self._open_monitor_manager).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="MEMORY", style="Jarvis.TButton", command=self._open_memory_manager).pack(side="left", padx=(0, 8))
+        ttk.Button(actions, text="CONTEXT", style="Jarvis.TButton", command=self._open_context_manager).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="API CONFIG", style="Jarvis.TButton", command=self._open_api_config).pack(side="left")
 
     def _panel(self, parent: tk.Misc, title: str) -> tk.Frame:
@@ -362,6 +373,12 @@ class JarvisApp(tk.Tk):
 
     def _run_command(self, command: str) -> None:
         try:
+            with self.conversation_lock:
+                history = [
+                    ChatMessage(turn.role, turn.content)
+                    for turn in self.conversation.recent_turns(limit=12)
+                ]
+                self.conversation.append("user", command)
             lowered = command.lower()
             if lowered.startswith("/screen "):
                 response = self._analyze_screen(command[8:].strip())
@@ -376,12 +393,46 @@ class JarvisApp(tk.Tk):
             elif lowered.startswith("/document "):
                 response = self._analyze_document_command(command[10:].strip())
             else:
-                response = self.router.run_tool_loop(command, self.registry.all(), self.dispatcher)
+                response = self.router.run_tool_loop(
+                    command,
+                    self.registry.all(),
+                    self.dispatcher,
+                    system_prompt=self._conversation_system_prompt(),
+                    conversation_history=history,
+                )
+            with self.conversation_lock:
+                self.conversation.append("assistant", response or "Action completed.")
             self.presence.mark_activity()
             self.events.put(("response", response or "Action completed."))
         except Exception as exc:
+            with self.conversation_lock:
+                try:
+                    self.conversation.append("assistant", "I could not complete that request safely.")
+                except Exception:
+                    pass
             self.presence.mark_activity()
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
+
+    def _conversation_system_prompt(self) -> str:
+        personality = self.preferences.get("personality", "professional")
+        style = self.preferences.get("response_style", "concise")
+        display_name = self.preferences.get("display_name", "").strip()
+        personality_text = {
+            "professional": "Be calm, professional, precise, and dependable.",
+            "warm": "Be warm and attentive while remaining concise and truthful.",
+            "focused": "Be direct, task-focused, and economical with words.",
+        }.get(personality, "Be calm, professional, precise, and dependable.")
+        style_text = {
+            "concise": "Prefer short answers unless detail is necessary.",
+            "balanced": "Use enough detail to make the answer practical without rambling.",
+            "detailed": "Explain reasoning and practical next steps clearly when useful.",
+        }.get(style, "Prefer short answers unless detail is necessary.")
+        address = f" Address the user as {display_name}." if display_name else ""
+        return (
+            "You are Jarvis, a safety-first local Windows assistant. Use only registered tools, "
+            "never invent tool results, and ask for clarification when needed. "
+            f"{personality_text} {style_text}{address}"
+        )
 
     def _search_web(self, query: str) -> str:
         results = self.web.search(query)
@@ -905,6 +956,109 @@ class JarvisApp(tk.Tk):
         if result.error:
             messagebox.showerror("Delete monitor", result.error, parent=self.monitor_window)
         self._monitor_refresh()
+
+    def _open_context_manager(self) -> None:
+        if self.context_window is not None and self.context_window.winfo_exists():
+            self.context_window.deiconify()
+            self.context_window.lift()
+            return
+        window = tk.Toplevel(self)
+        self.context_window = window
+        window.title("JARVIS // CONTEXT & PERSONALITY")
+        window.configure(bg=COLORS["bg"])
+        window.geometry("720x620")
+        window.minsize(620, 520)
+        window.transient(self)
+        window.protocol("WM_DELETE_WINDOW", self._close_context_manager)
+
+        tk.Label(window, text="CONTEXT & PERSONALITY", bg=COLORS["bg"], fg=COLORS["cyan"], font=("Segoe UI", 19, "bold")).pack(anchor="w", padx=24, pady=(22, 3))
+        tk.Label(window, text="Conversation history stays local and is bounded before it reaches a provider.", bg=COLORS["bg"], fg=COLORS["muted"], font=("Segoe UI", 9)).pack(anchor="w", padx=24, pady=(0, 18))
+
+        preferences = tk.Frame(window, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1)
+        preferences.pack(fill="x", padx=24, pady=(0, 14))
+        tk.Label(preferences, text="USER PREFERENCES", bg=COLORS["panel"], fg=COLORS["cyan"], font=("Cascadia Mono", 9, "bold")).pack(anchor="w", padx=16, pady=(14, 8))
+        form = tk.Frame(preferences, bg=COLORS["panel"])
+        form.pack(fill="x", padx=16, pady=(0, 14))
+        form.grid_columnconfigure(1, weight=1)
+        self.preference_vars = {
+            "display_name": tk.StringVar(value=self.preferences.get("display_name", "")),
+            "personality": tk.StringVar(value=self.preferences.get("personality", "professional")),
+            "response_style": tk.StringVar(value=self.preferences.get("response_style", "concise")),
+        }
+        fields = (
+            ("DISPLAY NAME", "display_name", None),
+            ("PERSONALITY", "personality", ("professional", "warm", "focused")),
+            ("RESPONSE STYLE", "response_style", ("concise", "balanced", "detailed")),
+        )
+        for row, (label, key, values) in enumerate(fields):
+            tk.Label(form, text=label, bg=COLORS["panel"], fg=COLORS["muted"], font=("Cascadia Mono", 8, "bold")).grid(row=row, column=0, sticky="w", padx=(0, 12), pady=6)
+            if values:
+                ttk.Combobox(form, textvariable=self.preference_vars[key], values=values, state="readonly", width=18).grid(row=row, column=1, sticky="w", pady=6)
+            else:
+                tk.Entry(form, textvariable=self.preference_vars[key], bg="#0d2030", fg=COLORS["text"], insertbackground=COLORS["cyan"], relief="flat", font=("Segoe UI", 10), width=34).grid(row=row, column=1, sticky="ew", pady=6, ipady=5)
+        ttk.Button(preferences, text="SAVE PREFERENCES", style="Jarvis.TButton", command=self._save_preferences).pack(anchor="e", padx=16, pady=(0, 14))
+
+        session_panel = tk.Frame(window, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1)
+        session_panel.pack(fill="both", expand=True, padx=24, pady=(0, 14))
+        tk.Label(session_panel, text="CONVERSATION SESSIONS", bg=COLORS["panel"], fg=COLORS["cyan"], font=("Cascadia Mono", 9, "bold")).pack(anchor="w", padx=16, pady=(14, 8))
+        list_frame = tk.Frame(session_panel, bg=COLORS["panel"])
+        list_frame.pack(fill="both", expand=True, padx=16)
+        self.session_list = tk.Listbox(list_frame, bg="#07111d", fg=COLORS["text"], selectbackground="#16405a", relief="flat", font=("Segoe UI", 10), activestyle="none")
+        self.session_list.pack(side="left", fill="both", expand=True)
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.session_list.yview)
+        scrollbar.pack(side="right", fill="y")
+        self.session_list.configure(yscrollcommand=scrollbar.set)
+        footer = tk.Frame(window, bg=COLORS["bg"])
+        footer.pack(fill="x", padx=24, pady=(0, 20))
+        self.context_status_label = tk.Label(footer, text="", bg=COLORS["bg"], fg=COLORS["muted"], font=("Cascadia Mono", 8))
+        self.context_status_label.pack(side="left")
+        ttk.Button(footer, text="NEW SESSION", style="Jarvis.TButton", command=self._new_conversation).pack(side="right", padx=(8, 0))
+        ttk.Button(footer, text="USE SELECTED", style="Jarvis.TButton", command=self._use_selected_session).pack(side="right", padx=(8, 0))
+        ttk.Button(footer, text="REFRESH", style="Jarvis.TButton", command=self._refresh_sessions).pack(side="right", padx=(8, 0))
+        ttk.Button(footer, text="CLOSE", style="Jarvis.TButton", command=self._close_context_manager).pack(side="right")
+        self._refresh_sessions()
+
+    def _close_context_manager(self) -> None:
+        if self.context_window is not None and self.context_window.winfo_exists():
+            self.context_window.destroy()
+        self.context_window = None
+
+    def _save_preferences(self) -> None:
+        try:
+            self.preferences = self.conversation.set_preferences({key: var.get() for key, var in self.preference_vars.items()})
+            self.context_status_label.configure(text="Preferences saved locally.", fg=COLORS["green"])
+        except Exception as exc:
+            messagebox.showerror("Preferences", str(exc), parent=self.context_window)
+
+    def _refresh_sessions(self) -> None:
+        if self.context_window is None or not self.context_window.winfo_exists():
+            return
+        self.session_list.delete(0, "end")
+        active = self.conversation.active_session_id()
+        for session in self.conversation.list_sessions():
+            marker = "  [ACTIVE]" if session.session_id == active else ""
+            self.session_list.insert("end", f"{session.title}  |  {session.session_id}{marker}")
+
+    def _new_conversation(self) -> None:
+        session = self.conversation.create_session("New conversation", activate=True)
+        self.presence.mark_activity()
+        self._write_log("SYSTEM", f"Started a new conversation session: {session.title}", COLORS["green"])
+        self._refresh_sessions()
+
+    def _use_selected_session(self) -> None:
+        selection = self.session_list.curselection() if hasattr(self, "session_list") else ()
+        if not selection:
+            return
+        sessions = self.conversation.list_sessions()
+        if selection[0] >= len(sessions):
+            return
+        try:
+            session = self.conversation.set_active_session(sessions[selection[0]].session_id)
+            self.presence.mark_activity()
+            self._write_log("SYSTEM", f"Active conversation: {session.title}", COLORS["green"])
+            self._refresh_sessions()
+        except Exception as exc:
+            messagebox.showerror("Conversation", str(exc), parent=self.context_window)
 
     def _open_memory_manager(self) -> None:
         if self.memory_window is not None and self.memory_window.winfo_exists():

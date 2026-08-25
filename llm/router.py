@@ -18,8 +18,7 @@ logger = logging.getLogger(__name__)
 class Provider(Protocol):
     provider_name: str
 
-    def complete(self, messages: list[ChatMessage], tools: list[ToolSpec]) -> LLMResponse:
-        ...
+    def complete(self, messages: list[ChatMessage], tools: list[ToolSpec]) -> LLMResponse: ...
 
 
 class AllProvidersFailed(RuntimeError):
@@ -61,20 +60,26 @@ class LLMRouter:
             provider = self.providers.get(provider_name)
             if provider is None:
                 failures.append((provider_name, "provider is not initialized"))
-                self.events.append(RouteEvent(provider_name, 0, False, "provider is not initialized"))
+                self.events.append(
+                    RouteEvent(provider_name, 0, False, "provider is not initialized")
+                )
                 continue
             for attempt in range(1, self.settings.max_retries_per_provider + 2):
                 try:
                     response = provider.complete(messages, tools)
                     self.events.append(RouteEvent(provider_name, attempt, True))
                     if failures:
-                        logger.warning("LLM provider failover selected %s after %s", provider_name, failures)
+                        logger.warning(
+                            "LLM provider failover selected %s after %s", provider_name, failures
+                        )
                     return response
                 except Exception as exc:  # provider errors must not stop fallback
                     error = _safe_error(exc)
                     failures.append((provider_name, error))
                     self.events.append(RouteEvent(provider_name, attempt, False, error))
-                    logger.warning("LLM provider %s attempt %d failed: %s", provider_name, attempt, error)
+                    logger.warning(
+                        "LLM provider %s attempt %d failed: %s", provider_name, attempt, error
+                    )
                     if attempt <= self.settings.max_retries_per_provider:
                         self.sleep_fn(0)
         raise AllProvidersFailed(failures)
@@ -103,13 +108,18 @@ class LLMRouter:
         tools: list[ToolSpec],
         dispatcher: Dispatcher,
         system_prompt: str = "You are Jarvis. Use only the registered tools and be concise.",
+        conversation_history: list[ChatMessage] | None = None,
     ) -> str:
         if not user_text.strip():
             raise ValueError("Command cannot be empty")
         if len(user_text) > self.settings.max_input_chars:
             raise ValueError("Command exceeds the configured input limit")
 
-        messages = [ChatMessage("system", system_prompt), ChatMessage("user", user_text)]
+        messages = [ChatMessage("system", system_prompt)]
+        for prior in (conversation_history or [])[-12:]:
+            if prior.role in {"user", "assistant"} and prior.content.strip():
+                messages.append(ChatMessage(prior.role, prior.content[:4_000]))
+        messages.append(ChatMessage("user", user_text))
         for _ in range(self.settings.max_tool_rounds):
             response = self.complete(messages, tools)
             if not response.tool_calls:
