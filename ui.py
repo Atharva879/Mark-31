@@ -24,6 +24,7 @@ from llm.schemas import ChatMessage
 from main import build_runtime
 from notifications import NativeToastBackend, NotificationCenter
 from permissions import PermissionStore
+from desktop_control import DesktopController
 from tray import TrayController
 from skills.camera import CameraCapture
 from skills.screen import ScreenCapture
@@ -97,6 +98,9 @@ class JarvisApp(tk.Tk):
         )
         self.permissions = PermissionStore(
             Path(os.environ.get("JARVIS_PERMISSIONS_DB", "memory/permissions.db"))
+        )
+        self.desktop = DesktopController(
+            permission_check=lambda: self.permissions.check("desktop_execute")
         )
         self.tray = TrayController(
             lambda: self.events.put(("show_window", "")),
@@ -342,6 +346,15 @@ class JarvisApp(tk.Tk):
         ).pack(side="left", padx=(0, 8))
         ttk.Button(
             actions, text="API CONFIG", style="Jarvis.TButton", command=self._open_api_config
+        ).pack(side="left", padx=(0, 8))
+        ttk.Button(
+            actions, text="EXECUTE MODE", style="Jarvis.TButton", command=self._toggle_execute_mode
+        ).pack(side="left", padx=(0, 8))
+        ttk.Button(
+            actions,
+            text="STOP ALL ACTIONS",
+            style="Jarvis.TButton",
+            command=self._stop_desktop_actions,
         ).pack(side="left")
 
     def _panel(self, parent: tk.Misc, title: str) -> tk.Frame:
@@ -864,6 +877,26 @@ class JarvisApp(tk.Tk):
         )
         response = provider.analyze_image(frame, prompt)
         return response.content if response else None
+
+    def _toggle_execute_mode(self) -> None:
+        if self.desktop.status()["execute_enabled"]:
+            self._stop_desktop_actions()
+            return
+        try:
+            self.permissions.grant(
+                "desktop_execute", duration_seconds=300, reason="explicit_execute_mode"
+            )
+            self.desktop.start_session(300)
+            self._write_log(
+                "SYSTEM", "Desktop Execute mode enabled for 5 minutes.", COLORS["orange"]
+            )
+        except Exception as exc:
+            messagebox.showerror("Execute mode", str(exc), parent=self)
+
+    def _stop_desktop_actions(self) -> None:
+        self.desktop.stop_all()
+        self.permissions.revoke("desktop_execute", "emergency_stop")
+        self._write_log("SYSTEM", "Emergency stop: desktop actions cancelled.", COLORS["green"])
 
     def _toggle_camera(self) -> None:
         if self.camera.status().active:
