@@ -75,6 +75,34 @@ class InteractiveBrowser:
         page.locator(selector).press(str(key), timeout=10_000)
         return {"action": "press", "selector": selector, "key": str(key)}
 
+    def list_pages(self) -> dict[str, object]:
+        self._ready()
+        return {
+            "pages": [
+                {"index": i, "url": page.url, "title": page.title()}
+                for i, page in enumerate(self.browser.contexts[0].pages)
+            ]
+        }
+
+    def select_page(self, index: int) -> dict[str, object]:
+        self._ready()
+        pages = self.browser.contexts[0].pages
+        if not isinstance(index, int) or index < 0 or index >= len(pages):
+            raise ValueError("browser page index is unavailable")
+        self.page = pages[index]
+        return {"index": index, "url": self.page.url, "title": self.page.title()}
+
+    def scroll(self, pixels: int) -> dict[str, object]:
+        page = self._ready()
+        value = max(-3000, min(int(pixels), 3000))
+        page.mouse.wheel(0, value)
+        return {"action": "scroll", "pixels": value}
+
+    def page_state(self) -> dict[str, object]:
+        page = self._ready()
+        text = page.locator("body").inner_text(timeout=10_000)
+        return {"url": page.url, "title": page.title(), "text": text[: self.max_text]}
+
     def close(self) -> dict[str, object]:
         if self.browser is not None:
             self.browser.close()
