@@ -89,6 +89,16 @@ class MemoryStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def all_memories(self, limit: int = 100_000) -> list[dict[str, str | int]]:
+        limit = max(1, min(int(limit), 100_000))
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id, kind, key, content, tags, source, created_at, updated_at "
+                "FROM memories ORDER BY id ASC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def recent(self, limit: int = 10) -> list[dict[str, str | int]]:
         limit = max(1, min(int(limit), 50))
         with self._connect() as connection:

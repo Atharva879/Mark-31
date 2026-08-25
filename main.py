@@ -15,7 +15,7 @@ from llm.gemini_client import GeminiClient
 from llm.openrouter_client import OpenRouterClient
 from llm.router import AllProvidersFailed, LLMRouter
 from llm.schemas import RiskTier, ToolSpec
-from memory.store import MemoryStore
+from memory.long_term import LongTermMemory
 from skills.apps import AppConfig, ApplicationController
 from skills.browser import ReadOnlyBrowser
 from skills.code_sandbox import CodeSandbox
@@ -33,7 +33,7 @@ def build_runtime(settings: Settings | None = None) -> tuple[LLMRouter, Dispatch
     logging.basicConfig(level=getattr(logging, settings.log_level, logging.INFO))
     audit = AuditLogger(settings.audit_log_path)
     registry = ToolRegistry()
-    memory = MemoryStore(settings.memory_db_path)
+    memory = LongTermMemory(settings.memory_db_path, settings.vector_db_path)
     _register_core_tools(registry, memory)
 
     if settings.allowed_roots:
@@ -61,7 +61,7 @@ def build_runtime(settings: Settings | None = None) -> tuple[LLMRouter, Dispatch
     return LLMRouter(providers, settings), dispatcher, registry
 
 
-def _register_core_tools(registry: ToolRegistry, memory: MemoryStore) -> None:
+def _register_core_tools(registry: ToolRegistry, memory: LongTermMemory) -> None:
     registry.register(
         ToolSpec(
             name="get_current_time",
@@ -134,6 +134,33 @@ def _register_core_tools(registry: ToolRegistry, memory: MemoryStore) -> None:
             },
             risk=RiskTier.SENSITIVE,
             handler=lambda memory_id: {"deleted": memory.forget(memory_id), "memory_id": memory_id},
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="semantic_recall_memory",
+            description="Find bounded long-term memories by local semantic similarity.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "maxLength": 500},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                    "min_score": {"type": "number"},
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.SAFE,
+            handler=lambda query, limit=10, min_score=0.1: memory.semantic_recall(query, limit, min_score),
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="reindex_memory",
+            description="Rebuild the local vector index from durable SQLite memories.",
+            parameters={"type": "object", "properties": {}, "additionalProperties": False},
+            risk=RiskTier.MODERATE,
+            handler=lambda: {"indexed": memory.reindex(), "stats": memory.stats()},
         )
     )
 
