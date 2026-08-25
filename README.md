@@ -28,6 +28,7 @@ The repository currently contains the first vertical slice:
 | Voice input and speech synthesis | Implemented as optional local push-to-talk voice support |
 | Web search and real-time retrieval | Implemented with bounded DuckDuckGo search and safe public URL fetching |
 | Image and document analysis | Implemented with scoped local ingestion and Gemini vision/text analysis |
+| Agent shell and browser tools | Implemented with shell allowlists, confirmations, limits, and read-only web navigation |
 | Scheduler/clipboard integrations | Planned for later milestones |
 | SimilarWeb analytics adapter | Planned for Milestone 10; credential/API boundary must be confirmed |
 
@@ -64,6 +65,8 @@ Voice input is activated explicitly with `START VOICE`. Each press records one b
 Web capabilities are available in Chat Mode and through the ordinary tool loop. Use `/search <query>` for bounded public DuckDuckGo results, or `/fetch <https-url>` to retrieve current text or JSON from a public endpoint. The fetcher enforces HTTP(S)-only URLs, blocks private and local network addresses, applies timeouts and response-size limits, rejects binary content types, and returns retrieval timestamps. It does not execute page scripts, follow arbitrary browser actions, or download files.
 
 Multimodal analysis is available for files under `JARVIS_ALLOWED_ROOTS`. In Chat Mode, use `/image <path> | <question>` for PNG/JPEG/WebP/BMP/GIF image analysis or `/document <path> | <question>` for TXT/Markdown/CSV/JSON/XML/HTML/PDF/DOCX analysis. Images are validated and normalized to in-memory PNG bytes; documents are extracted locally, bounded, and then sent through provider-isolated Gemini vision or the normal provider failover path. The application does not execute document scripts or write uploaded copies to a separate staging directory.
+
+Agent tool-calling now includes `run_shell_command` and `browse_web_page`. Shell execution accepts only configured executable names, never invokes a command shell, applies working-directory, argument, timeout, and output limits, and is classified as `SENSITIVE`, so the existing confirmation callback must approve every execution. Browser navigation is read-only and reuses the web safety boundary: no scripts, form submissions, downloads, or arbitrary interactive browser control. Use Chat Mode for natural-language tool selection, or use the explicit `/search` and `/fetch` commands for direct web retrieval.
 
 The current build includes persistent memory and registers file tools when `JARVIS_ALLOWED_ROOTS` is configured. Application tools are always present but require an allowlist and a Windows host; they fail closed on other operating systems. The first milestone does not require Windows-only dependencies because the application adapter is not executable on the sandbox and file tools remain disabled until roots are configured. Install the Windows extras only when those integrations are being implemented:
 
