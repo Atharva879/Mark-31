@@ -1,0 +1,3 @@
+# UI glass validation notes
+
+The original user screenshot is a flat, sharp-cornered cyan HUD with uniform dark panels and no material depth. The first generated preview accidentally showed the API dialog and exposed obsolete local-model fields. The second preview showed the redesigned main window with a layered midnight backdrop, differentiated glass surfaces, highlighted pane edges, interactive button surfaces, and a central layered lens/orb. The API dialog was then cleaned to contain Gemini and OpenRouter fields only. A headless Tk construction smoke test passes under Xvfb; actual Windows DWM Acrylic/Mica blur, native font rasterization, and physical-device behavior remain Windows-only.

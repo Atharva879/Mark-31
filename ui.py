@@ -45,26 +45,57 @@ except ImportError:  # pragma: no cover - optional until Windows extras are inst
 
 
 COLORS = {
-    "bg": "#07111f",
-    "panel": "#10243a",
-    "panel_alt": "#173452",
-    "line": "#2d6685",
-    "cyan": "#5ce8ff",
-    "cyan_dim": "#318eae",
-    "text": "#e8f8ff",
-    "muted": "#9bb8c9",
-    "green": "#47f0a1",
-    "orange": "#f5b34c",
-    "red": "#ff5c78",
+    "bg": "#07101d",
+    "bg_mid": "#0b1a2d",
+    "bg_glow": "#102b43",
+    "glass": "#122840",
+    "glass_alt": "#183651",
+    "glass_deep": "#0d2035",
+    "glass_edge": "#3b7898",
+    "glass_highlight": "#6edfff",
+    "panel": "#122840",
+    "panel_alt": "#183651",
+    "line": "#3b7898",
+    "cyan": "#79ecff",
+    "cyan_dim": "#4ba8c7",
+    "text": "#f0fbff",
+    "muted": "#a5c2d3",
+    "green": "#58f2b0",
+    "orange": "#ffc66b",
+    "red": "#ff718d",
 }
+
+
+class GlassButton(tk.Button):
+    """Borderless glass-style action control with a tactile hover state."""
+
+    def __init__(self, master=None, **kwargs):
+        kwargs.pop("style", None)
+        kwargs.setdefault("relief", "flat")
+        kwargs.setdefault("bd", 0)
+        kwargs.setdefault("highlightthickness", 1)
+        kwargs.setdefault("highlightbackground", COLORS["glass_edge"])
+        kwargs.setdefault("highlightcolor", COLORS["glass_highlight"])
+        kwargs.setdefault("background", COLORS["glass_alt"])
+        kwargs.setdefault("foreground", COLORS["cyan"])
+        kwargs.setdefault("activebackground", COLORS["bg_glow"])
+        kwargs.setdefault("activeforeground", COLORS["text"])
+        kwargs.setdefault("disabledforeground", COLORS["muted"])
+        kwargs.setdefault("cursor", "hand2")
+        kwargs.setdefault("padx", 13)
+        kwargs.setdefault("pady", 8)
+        kwargs.setdefault("font", ("Segoe UI", 9, "bold"))
+        super().__init__(master, **kwargs)
+        self.bind("<Enter>", lambda _event: self.configure(background=COLORS["bg_glow"]))
+        self.bind("<Leave>", lambda _event: self.configure(background=COLORS["glass_alt"]))
 
 
 class JarvisApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("JARVIS // Local Command Center")
-        self.geometry("1180x760")
-        self.minsize(900, 620)
+        self.geometry("1240x820")
+        self.minsize(1040, 700)
         self.configure(bg=COLORS["bg"])
         self.tk.call("tk", "scaling", 1.25)
         self.protocol("WM_DELETE_WINDOW", self._close)
@@ -413,20 +444,20 @@ class JarvisApp(tk.Tk):
         style.theme_use("clam")
         style.configure(
             "Jarvis.TButton",
-            background=COLORS["panel_alt"],
+            background=COLORS["glass_alt"],
             foreground=COLORS["cyan"],
             bordercolor=COLORS["cyan_dim"],
             lightcolor=COLORS["cyan_dim"],
-            darkcolor=COLORS["panel"],
+            darkcolor=COLORS["glass"],
             padding=(14, 8),
             font=("Segoe UI", 9, "bold"),
         )
         style.map("Jarvis.TButton", background=[("active", "#123149")])
         style.configure(
             "Jarvis.Horizontal.TProgressbar",
-            troughcolor=COLORS["panel_alt"],
+            troughcolor=COLORS["glass_alt"],
             background=COLORS["cyan"],
-            bordercolor=COLORS["line"],
+            bordercolor=COLORS["glass_edge"],
             lightcolor=COLORS["cyan"],
             darkcolor=COLORS["cyan"],
         )
@@ -434,11 +465,36 @@ class JarvisApp(tk.Tk):
     def _build_ui(self) -> None:
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(1, weight=1)
+        self._build_backdrop()
         self._build_header()
         self._build_left_telemetry()
         self._build_center_hud()
         self._build_right_console()
         self._build_footer()
+
+    def _build_backdrop(self) -> None:
+        """Paint layered depth behind the opaque Tk glass surfaces."""
+        self.backdrop = tk.Canvas(self, bg=COLORS["bg"], highlightthickness=0, bd=0)
+        self.backdrop.place(x=0, y=0, relwidth=1, relheight=1)
+        self.lower(self.backdrop)
+        self.backdrop.bind("<Configure>", self._draw_backdrop)
+
+    def _draw_backdrop(self, _event=None) -> None:
+        canvas = self.backdrop
+        width = max(canvas.winfo_width(), 1)
+        height = max(canvas.winfo_height(), 1)
+        canvas.delete("all")
+        canvas.create_rectangle(0, 0, width, height, fill=COLORS["bg"], outline="")
+        for cx, cy, radius, color in (
+            (width * 0.18, height * 0.08, width * 0.42, COLORS["bg_mid"]),
+            (width * 0.72, height * 0.30, width * 0.34, COLORS["bg_glow"]),
+            (width * 0.50, height * 0.96, width * 0.46, COLORS["bg_mid"]),
+        ):
+            for step in range(12, 0, -1):
+                r = radius * step / 12
+                canvas.create_oval(cx - r, cy - r, cx + r, cy + r, fill=color, outline="")
+        canvas.create_line(0, height * 0.16, width, height * 0.16, fill="#173852", width=1)
+        canvas.create_line(0, height * 0.84, width, height * 0.84, fill="#102b43", width=1)
 
     def _build_header(self) -> None:
         header = tk.Frame(self, bg=COLORS["bg"], height=72)
@@ -540,19 +596,19 @@ class JarvisApp(tk.Tk):
             ("STOP ALL ACTIONS", self._stop_desktop_actions),
         )
         for index, (label, command) in enumerate(action_specs):
-            button = ttk.Button(actions, text=label, style="Jarvis.TButton", command=command)
+            button = GlassButton(actions, text=label, style="Jarvis.TButton", command=command)
             button.grid(row=index // 3, column=index % 3, sticky="ew", padx=3, pady=3)
         for column in range(3):
             actions.grid_columnconfigure(column, weight=1)
 
     def _panel(self, parent: tk.Misc, title: str) -> tk.Frame:
-        frame = tk.Frame(
-            parent, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1
-        )
+        frame = tk.Frame(parent, bg=COLORS["glass"], bd=0, highlightthickness=0)
+        tk.Frame(frame, bg=COLORS["glass_highlight"], height=1).pack(fill="x", padx=12)
+        tk.Frame(frame, bg=COLORS["glass_deep"], height=1).pack(fill="x", padx=12)
         tk.Label(
             frame,
             text=title,
-            bg=COLORS["panel"],
+            bg=COLORS["glass"],
             fg=COLORS["cyan"],
             font=("Cascadia Mono", 10, "bold"),
             anchor="w",
@@ -567,15 +623,15 @@ class JarvisApp(tk.Tk):
         self.telemetry_values: dict[str, tk.Label] = {}
         self.telemetry_bars: dict[str, ttk.Progressbar] = {}
         for key, label in (("cpu", "CPU LOAD"), ("ram", "MEMORY"), ("disk", "DISK")):
-            block = tk.Frame(panel, bg=COLORS["panel"])
+            block = tk.Frame(panel, bg=COLORS["glass"])
             block.pack(fill="x", padx=16, pady=10)
-            row = tk.Frame(block, bg=COLORS["panel"])
+            row = tk.Frame(block, bg=COLORS["glass"])
             row.pack(fill="x")
             tk.Label(
-                row, text=label, bg=COLORS["panel"], fg=COLORS["muted"], font=("Consolas", 8)
+                row, text=label, bg=COLORS["glass"], fg=COLORS["muted"], font=("Consolas", 8)
             ).pack(side="left")
             value = tk.Label(
-                row, text="--%", bg=COLORS["panel"], fg=COLORS["text"], font=("Consolas", 9, "bold")
+                row, text="--%", bg=COLORS["glass"], fg=COLORS["text"], font=("Consolas", 9, "bold")
             )
             value.pack(side="right")
             self.telemetry_values[key] = value
@@ -583,7 +639,7 @@ class JarvisApp(tk.Tk):
             bar.pack(fill="x", pady=(7, 0))
             self.telemetry_bars[key] = bar
 
-        divider = tk.Frame(panel, bg=COLORS["line"], height=1)
+        divider = tk.Frame(panel, bg=COLORS["glass_edge"], height=1)
         divider.pack(fill="x", padx=16, pady=18)
         self._side_readout(panel, "HOST", os.environ.get("COMPUTERNAME", "LOCAL WORKSTATION"))
         self._side_readout(panel, "RUNTIME", "PYTHON 3.11+")
@@ -593,7 +649,7 @@ class JarvisApp(tk.Tk):
         tk.Label(
             panel,
             text="PERMISSION MATRIX",
-            bg=COLORS["panel"],
+            bg=COLORS["glass"],
             fg=COLORS["cyan"],
             font=("Consolas", 8, "bold"),
         ).pack(anchor="w", padx=16, pady=(24, 8))
@@ -602,34 +658,34 @@ class JarvisApp(tk.Tk):
             ("MODERATE", COLORS["orange"], "LOG + NOTIFY"),
             ("SENSITIVE", COLORS["red"], "CONFIRM"),
         ):
-            row = tk.Frame(panel, bg=COLORS["panel"])
+            row = tk.Frame(panel, bg=COLORS["glass"])
             row.pack(fill="x", padx=16, pady=3)
-            tk.Label(row, text="●", bg=COLORS["panel"], fg=color, font=("Consolas", 9)).pack(
+            tk.Label(row, text="●", bg=COLORS["glass"], fg=color, font=("Consolas", 9)).pack(
                 side="left"
             )
             tk.Label(
-                row, text=name, bg=COLORS["panel"], fg=COLORS["text"], font=("Consolas", 8, "bold")
+                row, text=name, bg=COLORS["glass"], fg=COLORS["text"], font=("Consolas", 8, "bold")
             ).pack(side="left", padx=7)
             tk.Label(
-                row, text=detail, bg=COLORS["panel"], fg=COLORS["muted"], font=("Consolas", 7)
+                row, text=detail, bg=COLORS["glass"], fg=COLORS["muted"], font=("Consolas", 7)
             ).pack(side="right")
 
     def _side_readout(self, parent: tk.Misc, key: str, value: str) -> None:
-        row = tk.Frame(parent, bg=COLORS["panel"])
+        row = tk.Frame(parent, bg=COLORS["glass"])
         row.pack(fill="x", padx=16, pady=4)
-        tk.Label(row, text=key, bg=COLORS["panel"], fg=COLORS["muted"], font=("Consolas", 8)).pack(
+        tk.Label(row, text=key, bg=COLORS["glass"], fg=COLORS["muted"], font=("Consolas", 8)).pack(
             side="left"
         )
         tk.Label(
-            row, text=value[:24], bg=COLORS["panel"], fg=COLORS["text"], font=("Consolas", 8)
+            row, text=value[:24], bg=COLORS["glass"], fg=COLORS["text"], font=("Consolas", 8)
         ).pack(side="right")
 
     def _build_center_hud(self) -> None:
-        panel = tk.Frame(self, bg=COLORS["bg"])
+        panel = tk.Frame(self, bg=COLORS["glass_deep"], bd=0, highlightthickness=1, highlightbackground=COLORS["glass_edge"])
         panel.grid(row=1, column=1, sticky="nsew", padx=10, pady=8)
         panel.grid_rowconfigure(0, weight=1)
         panel.grid_columnconfigure(0, weight=1)
-        self.hud = tk.Canvas(panel, bg=COLORS["bg"], highlightthickness=0)
+        self.hud = tk.Canvas(panel, bg=COLORS["glass_deep"], highlightthickness=0, bd=0)
         self.hud.grid(row=0, column=0, sticky="nsew")
         self.hud.bind("<Configure>", lambda _event: self._draw_hud())
         self.state_label = tk.Label(
@@ -648,7 +704,7 @@ class JarvisApp(tk.Tk):
             font=("Consolas", 8),
         )
         self.state_subtitle.grid(row=2, column=0, pady=(0, 18))
-        controls = tk.Frame(panel, bg=COLORS["bg"])
+        controls = tk.Frame(panel, bg=COLORS["glass_deep"])
         controls.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 18))
         control_specs = (
             ("INITIALIZE", self._focus_input),
@@ -665,7 +721,7 @@ class JarvisApp(tk.Tk):
             ("VOICE PRESENCE OFF", self._toggle_presence_voice),
         )
         for index, (label, command) in enumerate(control_specs):
-            button = ttk.Button(controls, text=label, style="Jarvis.TButton", command=command)
+            button = GlassButton(controls, text=label, style="Jarvis.TButton", command=command)
             button.grid(row=index // 3, column=index % 3, sticky="ew", padx=3, pady=3)
             if label == "ENABLE SCREEN":
                 self.screen_button = button
@@ -698,16 +754,19 @@ class JarvisApp(tk.Tk):
         radius = min(width, height) * 0.32
         pulse = (self._animation_tick % 18) * 1.3
         accent = COLORS["red"] if self.ui_state == "THINKING" else COLORS["cyan"]
-        for index, scale in enumerate((1.0, 0.82, 0.64, 0.46)):
+        for index, scale in enumerate((1.16, 1.04, 0.90, 0.74, 0.58, 0.42)):
             r = radius * scale + (pulse if index == 0 else 0)
             self.hud.create_oval(
                 cx - r,
                 cy - r,
                 cx + r,
                 cy + r,
-                outline=accent if index < 2 else COLORS["cyan_dim"],
-                width=1,
+                outline=accent if index in (0, 2) else COLORS["cyan_dim"],
+                fill=COLORS["bg_glow"] if index == 5 else "",
+                width=2 if index in (0, 2) else 1,
             )
+        self.hud.create_line(cx - radius * 1.2, cy, cx + radius * 1.2, cy, fill="#244b62", width=1)
+        self.hud.create_line(cx, cy - radius * 1.2, cx, cy + radius * 1.2, fill="#244b62", width=1)
         for angle in range(0, 360, 30):
             import math
 
@@ -766,7 +825,7 @@ class JarvisApp(tk.Tk):
             panel,
             wrap="word",
             height=20,
-            bg="#07111d",
+            bg=COLORS["glass_deep"],
             fg=COLORS["text"],
             relief="flat",
             borderwidth=0,
@@ -791,13 +850,13 @@ class JarvisApp(tk.Tk):
         tk.Label(
             panel,
             text="CHAT MODE OFF  //  ACTIVITY-ONLY VIEW",
-            bg=COLORS["panel"],
+            bg=COLORS["glass"],
             fg=COLORS["muted"],
             font=("Cascadia Mono", 8),
         ).pack(anchor="w", padx=16, pady=(0, 14))
 
     def _build_footer(self) -> None:
-        footer = tk.Frame(self, bg=COLORS["bg"])
+        footer = tk.Frame(self, bg=COLORS["glass_deep"], bd=0, highlightthickness=1, highlightbackground=COLORS["glass_edge"])
         footer.grid(row=2, column=0, columnspan=3, sticky="ew", padx=26, pady=(0, 18))
         footer.grid_columnconfigure(0, weight=1)
         self.footer_status = tk.Label(
@@ -1363,7 +1422,7 @@ class JarvisApp(tk.Tk):
         self.chat_view = ScrolledText(
             self.chat_window,
             wrap="word",
-            bg="#07111d",
+            bg=COLORS["glass_deep"],
             fg=COLORS["text"],
             insertbackground=COLORS["cyan"],
             relief="flat",
@@ -1386,7 +1445,7 @@ class JarvisApp(tk.Tk):
         )
         self.input.pack(side="left", fill="x", expand=True, ipady=10)
         self.input.bind("<Return>", lambda _event: self._send())
-        ttk.Button(compose, text="SEND", style="Jarvis.TButton", command=self._send).pack(
+        GlassButton(compose, text="SEND", style="Jarvis.TButton", command=self._send).pack(
             side="right", padx=(8, 0)
         )
         self.input.focus_set()
@@ -1517,7 +1576,10 @@ class JarvisApp(tk.Tk):
         ).pack(anchor="w", padx=24, pady=(0, 16))
 
         form = tk.Frame(
-            window, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1
+            window,
+            bg=COLORS["glass"],
+            highlightbackground=COLORS["glass_edge"],
+            highlightthickness=1,
         )
         form.pack(fill="x", padx=24, pady=(0, 12))
         self.monitor_name_var = tk.StringVar(value="")
@@ -1529,14 +1591,14 @@ class JarvisApp(tk.Tk):
             ("TARGET URL, ALLOWED FILE, OR REMINDER", self.monitor_target_var, 48),
         )
         for column, (label, variable, width) in enumerate(fields):
-            block = tk.Frame(form, bg=COLORS["panel"])
+            block = tk.Frame(form, bg=COLORS["glass"])
             block.grid(
                 row=0, column=column, sticky="ew", padx=(14 if column == 0 else 8, 8), pady=12
             )
             tk.Label(
                 block,
                 text=label,
-                bg=COLORS["panel"],
+                bg=COLORS["glass"],
                 fg=COLORS["muted"],
                 font=("Consolas", 8, "bold"),
             ).pack(anchor="w")
@@ -1550,12 +1612,12 @@ class JarvisApp(tk.Tk):
                 relief="flat",
                 font=("Segoe UI", 9),
             ).pack(fill="x", ipady=6, pady=(4, 0))
-        type_block = tk.Frame(form, bg=COLORS["panel"])
+        type_block = tk.Frame(form, bg=COLORS["glass"])
         type_block.grid(row=1, column=0, sticky="w", padx=14, pady=(0, 12))
         tk.Label(
             type_block,
             text="TYPE",
-            bg=COLORS["panel"],
+            bg=COLORS["glass"],
             fg=COLORS["muted"],
             font=("Consolas", 8, "bold"),
         ).pack(anchor="w")
@@ -1566,12 +1628,12 @@ class JarvisApp(tk.Tk):
             state="readonly",
             width=14,
         ).pack(pady=(4, 0))
-        interval_block = tk.Frame(form, bg=COLORS["panel"])
+        interval_block = tk.Frame(form, bg=COLORS["glass"])
         interval_block.grid(row=1, column=1, sticky="w", padx=8, pady=(0, 12))
         tk.Label(
             interval_block,
             text="INTERVAL (SECONDS, MIN 60)",
-            bg=COLORS["panel"],
+            bg=COLORS["glass"],
             fg=COLORS["muted"],
             font=("Consolas", 8, "bold"),
         ).pack(anchor="w")
@@ -1583,11 +1645,11 @@ class JarvisApp(tk.Tk):
             width=14,
             bg="#0d2030",
             fg=COLORS["text"],
-            buttonbackground=COLORS["panel_alt"],
+            buttonbackground=COLORS["glass_alt"],
             relief="flat",
             font=("Segoe UI", 9),
         ).pack(pady=(4, 0), ipady=4)
-        ttk.Button(
+        GlassButton(
             form, text="CREATE MONITOR", style="Jarvis.TButton", command=self._monitor_create
         ).grid(row=1, column=2, sticky="e", padx=14, pady=(0, 12))
         form.grid_columnconfigure(0, weight=1)
@@ -1595,7 +1657,10 @@ class JarvisApp(tk.Tk):
         form.grid_columnconfigure(2, weight=1)
 
         table_frame = tk.Frame(
-            window, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1
+            window,
+            bg=COLORS["glass"],
+            highlightbackground=COLORS["glass_edge"],
+            highlightthickness=1,
         )
         table_frame.pack(fill="both", expand=True, padx=24, pady=(0, 12))
         columns = ("id", "name", "kind", "enabled", "interval", "next", "last")
@@ -1638,19 +1703,19 @@ class JarvisApp(tk.Tk):
             font=("Cascadia Mono", 8),
         )
         self.monitor_status_label.pack(side="left")
-        ttk.Button(
+        GlassButton(
             footer, text="REFRESH", style="Jarvis.TButton", command=self._monitor_refresh
         ).pack(side="right", padx=(8, 0))
-        ttk.Button(
+        GlassButton(
             footer, text="RUN NOW", style="Jarvis.TButton", command=self._monitor_run_now
         ).pack(side="right", padx=(8, 0))
-        ttk.Button(
+        GlassButton(
             footer, text="PAUSE / RESUME", style="Jarvis.TButton", command=self._monitor_toggle
         ).pack(side="right", padx=(8, 0))
-        ttk.Button(
+        GlassButton(
             footer, text="DELETE", style="Jarvis.TButton", command=self._monitor_delete
         ).pack(side="right", padx=(8, 0))
-        ttk.Button(
+        GlassButton(
             footer, text="CLOSE", style="Jarvis.TButton", command=self._close_monitor_manager
         ).pack(side="right")
         self._monitor_refresh()
@@ -1825,7 +1890,10 @@ class JarvisApp(tk.Tk):
             font=("Segoe UI", 9),
         ).pack(anchor="w", padx=24, pady=(0, 16))
         create_panel = tk.Frame(
-            window, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1
+            window,
+            bg=COLORS["glass"],
+            highlightbackground=COLORS["glass_edge"],
+            highlightthickness=1,
         )
         create_panel.pack(fill="x", padx=24, pady=(0, 12))
         self.workflow_name_var = tk.StringVar()
@@ -1859,19 +1927,22 @@ class JarvisApp(tk.Tk):
             font=("Cascadia Mono", 9),
             width=28,
         ).pack(side="left", padx=6, pady=10, ipady=5)
-        ttk.Button(
+        GlassButton(
             create_panel,
             text="CREATE SAFE",
             style="Jarvis.TButton",
             command=self._create_safe_workflow,
         ).pack(side="right", padx=12, pady=10)
         frame = tk.Frame(
-            window, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1
+            window,
+            bg=COLORS["glass"],
+            highlightbackground=COLORS["glass_edge"],
+            highlightthickness=1,
         )
         frame.pack(fill="both", expand=True, padx=24, pady=(0, 14))
         self.workflow_list = tk.Listbox(
             frame,
-            bg="#07111d",
+            bg=COLORS["glass_deep"],
             fg=COLORS["text"],
             selectbackground="#16405a",
             relief="flat",
@@ -1885,16 +1956,16 @@ class JarvisApp(tk.Tk):
             footer, text="", bg=COLORS["bg"], fg=COLORS["muted"], font=("Cascadia Mono", 8)
         )
         self.workflow_status_label.pack(side="left")
-        ttk.Button(
+        GlassButton(
             footer, text="PREVIEW", style="Jarvis.TButton", command=self._preview_selected_workflow
         ).pack(side="right", padx=(8, 0))
-        ttk.Button(
+        GlassButton(
             footer, text="RUN SAFE", style="Jarvis.TButton", command=self._run_selected_workflow
         ).pack(side="right", padx=(8, 0))
-        ttk.Button(
+        GlassButton(
             footer, text="REFRESH", style="Jarvis.TButton", command=self._refresh_workflows
         ).pack(side="right", padx=(8, 0))
-        ttk.Button(
+        GlassButton(
             footer, text="CLOSE", style="Jarvis.TButton", command=self._close_workflow_manager
         ).pack(side="right")
         self._refresh_workflows()
@@ -2002,12 +2073,15 @@ class JarvisApp(tk.Tk):
             font=("Segoe UI", 9),
         ).pack(anchor="w", padx=24, pady=(0, 16))
         frame = tk.Frame(
-            window, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1
+            window,
+            bg=COLORS["glass"],
+            highlightbackground=COLORS["glass_edge"],
+            highlightthickness=1,
         )
         frame.pack(fill="both", expand=True, padx=24, pady=(0, 14))
         self.permission_list = tk.Listbox(
             frame,
-            bg="#07111d",
+            bg=COLORS["glass_deep"],
             fg=COLORS["text"],
             selectbackground="#16405a",
             relief="flat",
@@ -2021,19 +2095,19 @@ class JarvisApp(tk.Tk):
             footer, text="", bg=COLORS["bg"], fg=COLORS["muted"], font=("Cascadia Mono", 8)
         )
         self.permission_status_label.pack(side="left")
-        ttk.Button(
+        GlassButton(
             footer,
             text="REVOKE SELECTED",
             style="Jarvis.TButton",
             command=self._revoke_selected_permission,
         ).pack(side="right", padx=(8, 0))
-        ttk.Button(
+        GlassButton(
             footer, text="REVOKE ALL", style="Jarvis.TButton", command=self._revoke_all_permissions
         ).pack(side="right", padx=(8, 0))
-        ttk.Button(
+        GlassButton(
             footer, text="REFRESH", style="Jarvis.TButton", command=self._refresh_permissions
         ).pack(side="right", padx=(8, 0))
-        ttk.Button(
+        GlassButton(
             footer, text="CLOSE", style="Jarvis.TButton", command=self._close_permissions_manager
         ).pack(side="right")
         self._refresh_permissions()
@@ -2136,7 +2210,7 @@ class JarvisApp(tk.Tk):
         self.notification_view = ScrolledText(
             window,
             wrap="word",
-            bg="#07111d",
+            bg=COLORS["glass_deep"],
             fg=COLORS["text"],
             relief="flat",
             borderwidth=0,
@@ -2148,16 +2222,16 @@ class JarvisApp(tk.Tk):
         self.notification_view.configure(state="disabled")
         footer = tk.Frame(window, bg=COLORS["bg"])
         footer.pack(fill="x", padx=24, pady=(0, 20))
-        ttk.Button(
+        GlassButton(
             footer,
             text="MARK ALL READ",
             style="Jarvis.TButton",
             command=self._notifications_mark_read,
         ).pack(side="left")
-        ttk.Button(
+        GlassButton(
             footer, text="REFRESH", style="Jarvis.TButton", command=self._notifications_refresh
         ).pack(side="right", padx=(8, 0))
-        ttk.Button(
+        GlassButton(
             footer, text="CLOSE", style="Jarvis.TButton", command=self._close_notification_history
         ).pack(side="right")
         self._notifications_refresh()
@@ -2217,17 +2291,20 @@ class JarvisApp(tk.Tk):
         ).pack(anchor="w", padx=24, pady=(0, 18))
 
         preferences = tk.Frame(
-            window, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1
+            window,
+            bg=COLORS["glass"],
+            highlightbackground=COLORS["glass_edge"],
+            highlightthickness=1,
         )
         preferences.pack(fill="x", padx=24, pady=(0, 14))
         tk.Label(
             preferences,
             text="USER PREFERENCES",
-            bg=COLORS["panel"],
+            bg=COLORS["glass"],
             fg=COLORS["cyan"],
             font=("Cascadia Mono", 9, "bold"),
         ).pack(anchor="w", padx=16, pady=(14, 8))
-        form = tk.Frame(preferences, bg=COLORS["panel"])
+        form = tk.Frame(preferences, bg=COLORS["glass"])
         form.pack(fill="x", padx=16, pady=(0, 14))
         form.grid_columnconfigure(1, weight=1)
         self.preference_vars = {
@@ -2244,7 +2321,7 @@ class JarvisApp(tk.Tk):
             tk.Label(
                 form,
                 text=label,
-                bg=COLORS["panel"],
+                bg=COLORS["glass"],
                 fg=COLORS["muted"],
                 font=("Cascadia Mono", 8, "bold"),
             ).grid(row=row, column=0, sticky="w", padx=(0, 12), pady=6)
@@ -2267,7 +2344,7 @@ class JarvisApp(tk.Tk):
                     font=("Segoe UI", 10),
                     width=34,
                 ).grid(row=row, column=1, sticky="ew", pady=6, ipady=5)
-        ttk.Button(
+        GlassButton(
             preferences,
             text="SAVE PREFERENCES",
             style="Jarvis.TButton",
@@ -2275,21 +2352,24 @@ class JarvisApp(tk.Tk):
         ).pack(anchor="e", padx=16, pady=(0, 14))
 
         session_panel = tk.Frame(
-            window, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1
+            window,
+            bg=COLORS["glass"],
+            highlightbackground=COLORS["glass_edge"],
+            highlightthickness=1,
         )
         session_panel.pack(fill="both", expand=True, padx=24, pady=(0, 14))
         tk.Label(
             session_panel,
             text="CONVERSATION SESSIONS",
-            bg=COLORS["panel"],
+            bg=COLORS["glass"],
             fg=COLORS["cyan"],
             font=("Cascadia Mono", 9, "bold"),
         ).pack(anchor="w", padx=16, pady=(14, 8))
-        list_frame = tk.Frame(session_panel, bg=COLORS["panel"])
+        list_frame = tk.Frame(session_panel, bg=COLORS["glass"])
         list_frame.pack(fill="both", expand=True, padx=16)
         self.session_list = tk.Listbox(
             list_frame,
-            bg="#07111d",
+            bg=COLORS["glass_deep"],
             fg=COLORS["text"],
             selectbackground="#16405a",
             relief="flat",
@@ -2306,16 +2386,16 @@ class JarvisApp(tk.Tk):
             footer, text="", bg=COLORS["bg"], fg=COLORS["muted"], font=("Cascadia Mono", 8)
         )
         self.context_status_label.pack(side="left")
-        ttk.Button(
+        GlassButton(
             footer, text="NEW SESSION", style="Jarvis.TButton", command=self._new_conversation
         ).pack(side="right", padx=(8, 0))
-        ttk.Button(
+        GlassButton(
             footer, text="USE SELECTED", style="Jarvis.TButton", command=self._use_selected_session
         ).pack(side="right", padx=(8, 0))
-        ttk.Button(
+        GlassButton(
             footer, text="REFRESH", style="Jarvis.TButton", command=self._refresh_sessions
         ).pack(side="right", padx=(8, 0))
-        ttk.Button(
+        GlassButton(
             footer, text="CLOSE", style="Jarvis.TButton", command=self._close_context_manager
         ).pack(side="right")
         self._refresh_sessions()
@@ -2421,12 +2501,15 @@ class JarvisApp(tk.Tk):
             state="readonly",
             width=11,
         ).pack(side="left", padx=8)
-        ttk.Button(search, text="SEARCH", style="Jarvis.TButton", command=self._memory_search).pack(
-            side="left"
-        )
+        GlassButton(
+            search, text="SEARCH", style="Jarvis.TButton", command=self._memory_search
+        ).pack(side="left")
 
         table_frame = tk.Frame(
-            window, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1
+            window,
+            bg=COLORS["glass"],
+            highlightbackground=COLORS["glass_edge"],
+            highlightthickness=1,
         )
         table_frame.pack(fill="both", expand=True, padx=24, pady=(0, 12))
         columns = ("id", "kind", "content", "tags", "score", "vector")
@@ -2461,19 +2544,19 @@ class JarvisApp(tk.Tk):
             font=("Cascadia Mono", 8),
         )
         self.memory_status_label.pack(side="left")
-        ttk.Button(
+        GlassButton(
             footer, text="REFRESH", style="Jarvis.TButton", command=self._memory_refresh
         ).pack(side="right", padx=(8, 0))
-        ttk.Button(
+        GlassButton(
             footer, text="REINDEX", style="Jarvis.TButton", command=self._memory_reindex
         ).pack(side="right", padx=(8, 0))
-        ttk.Button(
+        GlassButton(
             footer,
             text="DELETE SELECTED",
             style="Jarvis.TButton",
             command=self._memory_delete_selected,
         ).pack(side="right", padx=(8, 0))
-        ttk.Button(
+        GlassButton(
             footer, text="CLOSE", style="Jarvis.TButton", command=self._close_memory_manager
         ).pack(side="right")
         self._memory_refresh()
@@ -2640,8 +2723,6 @@ class JarvisApp(tk.Tk):
         order_var = tk.StringVar(value=",".join(self.settings.provider_order))
         gemini_model_var = tk.StringVar(value=self.settings.gemini_model)
         openrouter_model_var = tk.StringVar(value=self.settings.openrouter_model)
-        local_model_var = tk.StringVar(value=self.settings.local_model)
-        local_url_var = tk.StringVar(value=self.settings.local_base_url)
         key_fields = []
         entries = (
             ("GEMINI API KEY", gemini_var, True),
@@ -2649,8 +2730,6 @@ class JarvisApp(tk.Tk):
             ("FALLBACK ORDER", order_var, False),
             ("GEMINI MODEL", gemini_model_var, False),
             ("OPENROUTER MODEL", openrouter_model_var, False),
-            ("LOCAL MODEL", local_model_var, False),
-            ("LOCAL ENDPOINT", local_url_var, False),
         )
         for row, (label, variable, secret) in enumerate(entries):
             tk.Label(
@@ -2683,24 +2762,24 @@ class JarvisApp(tk.Tk):
             command=toggle_keys,
             bg=COLORS["bg"],
             fg=COLORS["muted"],
-            selectcolor=COLORS["panel"],
+            selectcolor=COLORS["glass"],
             activebackground=COLORS["bg"],
             activeforeground=COLORS["cyan"],
             font=("Consolas", 8),
         ).pack(anchor="w", padx=28, pady=(12, 8))
         tk.Label(
             window,
-            text="LOCAL PROVIDERS MUST USE A LOOPBACK ENDPOINT. FALLBACK ORDER ACCEPTS local, gemini, openrouter.",
+            text="VOICE USES GEMINI IN MEMORY. CHAT ROUTING SUPPORTS GEMINI AND OPENROUTER ONLY.",
             bg=COLORS["bg"],
             fg=COLORS["cyan_dim"],
             font=("Cascadia Mono", 7),
         ).pack(anchor="w", padx=28, pady=(0, 8))
         buttons = tk.Frame(window, bg=COLORS["bg"])
         buttons.pack(fill="x", padx=28, pady=12)
-        ttk.Button(buttons, text="CANCEL", style="Jarvis.TButton", command=window.destroy).pack(
+        GlassButton(buttons, text="CANCEL", style="Jarvis.TButton", command=window.destroy).pack(
             side="right", padx=(8, 0)
         )
-        ttk.Button(
+        GlassButton(
             buttons,
             text="SAVE + APPLY",
             style="Jarvis.TButton",
@@ -2711,8 +2790,6 @@ class JarvisApp(tk.Tk):
                 order_var.get(),
                 gemini_model_var.get(),
                 openrouter_model_var.get(),
-                local_model_var.get(),
-                local_url_var.get(),
             ),
         ).pack(side="right")
 
@@ -2724,8 +2801,6 @@ class JarvisApp(tk.Tk):
         order: str,
         gemini_model: str,
         openrouter_model: str,
-        local_model: str,
-        local_url: str,
     ) -> None:
         try:
             values = dict(os.environ)
@@ -2736,8 +2811,6 @@ class JarvisApp(tk.Tk):
                     "JARVIS_PROVIDER_ORDER": order.strip(),
                     "GEMINI_MODEL": gemini_model.strip(),
                     "OPENROUTER_MODEL": openrouter_model.strip(),
-                    "JARVIS_LOCAL_MODEL": local_model.strip(),
-                    "JARVIS_LOCAL_BASE_URL": local_url.strip(),
                 }
             )
             new_settings = Settings.from_env(values)
@@ -2747,8 +2820,6 @@ class JarvisApp(tk.Tk):
                 order.strip(),
                 gemini_model.strip(),
                 openrouter_model.strip(),
-                local_model.strip(),
-                local_url.strip(),
             )
             os.environ.update(
                 {
@@ -2757,8 +2828,6 @@ class JarvisApp(tk.Tk):
                     "JARVIS_PROVIDER_ORDER": order.strip(),
                     "GEMINI_MODEL": gemini_model.strip(),
                     "OPENROUTER_MODEL": openrouter_model.strip(),
-                    "JARVIS_LOCAL_MODEL": local_model.strip(),
-                    "JARVIS_LOCAL_BASE_URL": local_url.strip(),
                 }
             )
             self.settings = new_settings

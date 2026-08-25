@@ -14,3 +14,5 @@ def test_api_config_is_saved_locally_without_overwriting_other_settings(tmp_path
     assert "GEMINI_API_KEY=gemini-secret" in content
     assert "OPENROUTER_API_KEY=router-secret" in content
     assert "JARVIS_PROVIDER_ORDER=openrouter,gemini" in content
+    assert "JARVIS_LOCAL_MODEL" not in content
+    assert "JARVIS_LOCAL_BASE_URL" not in content

@@ -12,11 +12,9 @@ def write_local_env(
     order: str,
     gemini_model: str = "gemini-3.6-flash",
     openrouter_model: str = "deepseek/deepseek-chat-v3.1",
-    local_model: str = "llama3.2",
-    local_base_url: str = "http://127.0.0.1:11434/v1/chat/completions",
     path: Path | str = ".env",
 ) -> None:
-    """Persist only edited provider settings; never log their values."""
+    """Persist Gemini/OpenRouter settings without logging their values."""
     target = Path(path)
     existing: dict[str, str] = {}
     if target.exists():
@@ -24,6 +22,8 @@ def write_local_env(
             if "=" in line and not line.lstrip().startswith("#"):
                 key, value = line.split("=", 1)
                 existing[key.strip()] = value
+    existing.pop("JARVIS_LOCAL_MODEL", None)
+    existing.pop("JARVIS_LOCAL_BASE_URL", None)
     existing.update(
         {
             "GEMINI_API_KEY": gemini_key,
@@ -31,8 +31,6 @@ def write_local_env(
             "JARVIS_PROVIDER_ORDER": order,
             "GEMINI_MODEL": gemini_model,
             "OPENROUTER_MODEL": openrouter_model,
-            "JARVIS_LOCAL_MODEL": local_model,
-            "JARVIS_LOCAL_BASE_URL": local_base_url,
         }
     )
     target.write_text(
