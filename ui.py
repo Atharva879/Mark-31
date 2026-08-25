@@ -45,14 +45,14 @@ except ImportError:  # pragma: no cover - optional until Windows extras are inst
 
 
 COLORS = {
-    "bg": "#050b13",
-    "panel": "#0a1522",
-    "panel_alt": "#0e1d2d",
-    "line": "#17354a",
-    "cyan": "#00d9ff",
-    "cyan_dim": "#167b99",
-    "text": "#d5edf5",
-    "muted": "#6e8ca3",
+    "bg": "#07111f",
+    "panel": "#10243a",
+    "panel_alt": "#173452",
+    "line": "#2d6685",
+    "cyan": "#5ce8ff",
+    "cyan_dim": "#318eae",
+    "text": "#e8f8ff",
+    "muted": "#9bb8c9",
     "green": "#47f0a1",
     "orange": "#f5b34c",
     "red": "#ff5c78",
@@ -63,8 +63,8 @@ class JarvisApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("JARVIS // Local Command Center")
-        self.geometry("1450x860")
-        self.minsize(1120, 700)
+        self.geometry("1180x760")
+        self.minsize(900, 620)
         self.configure(bg=COLORS["bg"])
         self.tk.call("tk", "scaling", 1.25)
         self.protocol("WM_DELETE_WINDOW", self._close)
@@ -154,7 +154,9 @@ class JarvisApp(tk.Tk):
         )
         self.tts = SpeechSynthesizer(rate=int(os.environ.get("JARVIS_TTS_RATE", "175")))
         self.voice_request_active = False
-        self.voice_mode = "push_to_talk"
+        self.voice_mode = os.environ.get("JARVIS_VOICE_MODE", "normal_talk").strip().lower()
+        if self.voice_mode not in {"push_to_talk", "normal_talk"}:
+            self.voice_mode = "normal_talk"
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.presence = PresenceEngine(
             PresenceStore(self.settings.presence_db_path),
@@ -178,6 +180,8 @@ class JarvisApp(tk.Tk):
         self._animation_tick = 0
         self._build_styles()
         self._build_ui()
+        if not self.settings.gemini_api_key and not self.settings.openrouter_api_key:
+            self.after_idle(self._open_api_config)
         if self.presence.status()["silent"]:
             self.presence_button.configure(text="RESUME PRESENCE")
         self._write_log("SYSTEM", "Jarvis desktop interface initialized.", COLORS["green"])
@@ -517,43 +521,23 @@ class JarvisApp(tk.Tk):
             font=("Cascadia Mono", 8),
         ).pack(anchor="e", pady=(3, 0))
         actions = tk.Frame(header, bg=COLORS["bg"])
-        actions.grid(row=0, column=2, rowspan=2, sticky="e")
-        ttk.Button(
-            actions, text="MONITORS", style="Jarvis.TButton", command=self._open_monitor_manager
-        ).pack(side="left", padx=(0, 8))
-        ttk.Button(
-            actions, text="MEMORY", style="Jarvis.TButton", command=self._open_memory_manager
-        ).pack(side="left", padx=(0, 8))
-        ttk.Button(
-            actions, text="CONTEXT", style="Jarvis.TButton", command=self._open_context_manager
-        ).pack(side="left", padx=(0, 8))
-        ttk.Button(
-            actions, text="ALERTS", style="Jarvis.TButton", command=self._open_notification_history
-        ).pack(side="left", padx=(0, 8))
-        ttk.Button(
-            actions,
-            text="PERMISSIONS",
-            style="Jarvis.TButton",
-            command=self._open_permissions_manager,
-        ).pack(side="left", padx=(0, 8))
-        ttk.Button(
-            actions,
-            text="ROUTINES",
-            style="Jarvis.TButton",
-            command=self._open_workflow_manager,
-        ).pack(side="left", padx=(0, 8))
-        ttk.Button(
-            actions, text="API CONFIG", style="Jarvis.TButton", command=self._open_api_config
-        ).pack(side="left", padx=(0, 8))
-        ttk.Button(
-            actions, text="EXECUTE MODE", style="Jarvis.TButton", command=self._toggle_execute_mode
-        ).pack(side="left", padx=(0, 8))
-        ttk.Button(
-            actions,
-            text="STOP ALL ACTIONS",
-            style="Jarvis.TButton",
-            command=self._stop_desktop_actions,
-        ).pack(side="left")
+        actions.grid(row=0, column=2, rowspan=2, sticky="ne", padx=(12, 0))
+        action_specs = (
+            ("MONITORS", self._open_monitor_manager),
+            ("MEMORY", self._open_memory_manager),
+            ("CONTEXT", self._open_context_manager),
+            ("ALERTS", self._open_notification_history),
+            ("PERMISSIONS", self._open_permissions_manager),
+            ("ROUTINES", self._open_workflow_manager),
+            ("API CONFIG", self._open_api_config),
+            ("EXECUTE MODE", self._toggle_execute_mode),
+            ("STOP ALL ACTIONS", self._stop_desktop_actions),
+        )
+        for index, (label, command) in enumerate(action_specs):
+            button = ttk.Button(actions, text=label, style="Jarvis.TButton", command=command)
+            button.grid(row=index // 3, column=index % 3, sticky="ew", padx=3, pady=3)
+        for column in range(3):
+            actions.grid_columnconfigure(column, weight=1)
 
     def _panel(self, parent: tk.Misc, title: str) -> tk.Frame:
         frame = tk.Frame(
@@ -659,74 +643,46 @@ class JarvisApp(tk.Tk):
         )
         self.state_subtitle.grid(row=2, column=0, pady=(0, 18))
         controls = tk.Frame(panel, bg=COLORS["bg"])
-        controls.grid(row=3, column=0, pady=(0, 18))
-        ttk.Button(
-            controls, text="INITIALIZE", style="Jarvis.TButton", command=self._focus_input
-        ).pack(side="left", padx=5)
-        self.screen_button = ttk.Button(
-            controls, text="ENABLE SCREEN", style="Jarvis.TButton", command=self._toggle_screen
+        controls.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 18))
+        control_specs = (
+            ("INITIALIZE", self._focus_input),
+            ("ENABLE SCREEN", self._toggle_screen),
+            ("ENABLE CAMERA", self._toggle_camera),
+            ("VISUAL THOUGHTS OFF", self._toggle_visual_thoughts),
+            ("WINDOW CONTEXT OFF", self._toggle_window_context),
+            ("CLIPBOARD OFF", self._toggle_clipboard_context),
+            ("ENABLE CHAT MODE", self._toggle_chat_mode),
+            ("START VOICE", self._start_voice),
+            ("VOICE: NORMAL TALK", self._toggle_voice_mode),
+            ("INTERRUPT", self._interrupt),
+            ("STAY SILENT", self._toggle_presence_silence),
+            ("VOICE PRESENCE OFF", self._toggle_presence_voice),
         )
-        self.screen_button.pack(side="left", padx=5)
-        self.camera_button = ttk.Button(
-            controls, text="ENABLE CAMERA", style="Jarvis.TButton", command=self._toggle_camera
-        )
-        self.camera_button.pack(side="left", padx=5)
-        self.visual_thoughts_button = ttk.Button(
-            controls,
-            text="VISUAL THOUGHTS OFF",
-            style="Jarvis.TButton",
-            command=self._toggle_visual_thoughts,
-        )
-        self.visual_thoughts_button.pack(side="left", padx=5)
-        self.window_context_button = ttk.Button(
-            controls,
-            text="WINDOW CONTEXT OFF",
-            style="Jarvis.TButton",
-            command=self._toggle_window_context,
-        )
-        self.window_context_button.pack(side="left", padx=5)
-        self.clipboard_context_button = ttk.Button(
-            controls,
-            text="CLIPBOARD OFF",
-            style="Jarvis.TButton",
-            command=self._toggle_clipboard_context,
-        )
-        self.clipboard_context_button.pack(side="left", padx=5)
-        self.chat_mode_button = ttk.Button(
-            controls,
-            text="ENABLE CHAT MODE",
-            style="Jarvis.TButton",
-            command=self._toggle_chat_mode,
-        )
-        self.chat_mode_button.pack(side="left", padx=5)
-        self.voice_button = ttk.Button(
-            controls, text="START VOICE", style="Jarvis.TButton", command=self._start_voice
-        )
-        self.voice_button.pack(side="left", padx=5)
-        self.voice_mode_button = ttk.Button(
-            controls,
-            text="VOICE: PUSH-TO-TALK",
-            style="Jarvis.TButton",
-            command=self._toggle_voice_mode,
-        )
-        self.voice_mode_button.pack(side="left", padx=5)
-        ttk.Button(
-            controls, text="INTERRUPT", style="Jarvis.TButton", command=self._interrupt
-        ).pack(side="left", padx=5)
-        self.presence_button = ttk.Button(
-            controls,
-            text="STAY SILENT",
-            style="Jarvis.TButton",
-            command=self._toggle_presence_silence,
-        )
-        self.presence_button.pack(side="left", padx=5)
-        self.presence_voice_button = ttk.Button(
-            controls,
-            text="VOICE PRESENCE OFF",
-            style="Jarvis.TButton",
-            command=self._toggle_presence_voice,
-        )
-        self.presence_voice_button.pack(side="left", padx=5)
+        for index, (label, command) in enumerate(control_specs):
+            button = ttk.Button(controls, text=label, style="Jarvis.TButton", command=command)
+            button.grid(row=index // 3, column=index % 3, sticky="ew", padx=3, pady=3)
+            if label == "ENABLE SCREEN":
+                self.screen_button = button
+            elif label == "ENABLE CAMERA":
+                self.camera_button = button
+            elif label == "VISUAL THOUGHTS OFF":
+                self.visual_thoughts_button = button
+            elif label == "WINDOW CONTEXT OFF":
+                self.window_context_button = button
+            elif label == "CLIPBOARD OFF":
+                self.clipboard_context_button = button
+            elif label == "ENABLE CHAT MODE":
+                self.chat_mode_button = button
+            elif label == "START VOICE":
+                self.voice_button = button
+            elif label == "VOICE: NORMAL TALK":
+                self.voice_mode_button = button
+            elif label == "STAY SILENT":
+                self.presence_button = button
+            elif label == "VOICE PRESENCE OFF":
+                self.presence_voice_button = button
+        for column in range(3):
+            controls.grid_columnconfigure(column, weight=1)
 
     def _draw_hud(self) -> None:
         self.hud.delete("all")

@@ -35,7 +35,7 @@ from skills.shell import SafeCommandExecutor
 from skills.web import WebClient
 from backup import BackupManager
 from scheduler import BackgroundScheduler, SchedulerStore
-from secrets import SecretStore
+from jarvis_secrets import SecretStore
 from workflows import SafeWorkflowEngine, WorkflowStep, WorkflowStore
 from task_loops import AutonomousLoopController, TaskLoopStore
 from startup import StartupManager
