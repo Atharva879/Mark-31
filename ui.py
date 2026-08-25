@@ -21,6 +21,7 @@ from main import build_runtime
 from skills.screen import ScreenCapture
 from skills.voice import SpeechSynthesizer, VoiceInput
 from skills.web import WebClient
+from skills.multimodal import MultimodalIngestor
 from ui_config import write_local_env
 
 try:
@@ -65,6 +66,11 @@ class JarvisApp(tk.Tk):
             max_results=int(os.environ.get("JARVIS_WEB_MAX_RESULTS", "5")),
             allowed_hosts={item.strip().lower() for item in os.environ.get("JARVIS_WEB_ALLOWED_HOSTS", "").split(",") if item.strip()},
         )
+        self.multimodal = MultimodalIngestor(
+            self.settings.allowed_roots,
+            max_bytes=int(os.environ.get("JARVIS_MULTIMODAL_MAX_BYTES", "12000000")),
+            max_chars=int(os.environ.get("JARVIS_DOCUMENT_MAX_CHARS", "80000")),
+        ) if self.settings.allowed_roots else None
         self.voice_input = VoiceInput(
             model_size=os.environ.get("JARVIS_WHISPER_MODEL", "base"),
             max_seconds=float(os.environ.get("JARVIS_VOICE_MAX_SECONDS", "10")),
@@ -139,6 +145,7 @@ class JarvisApp(tk.Tk):
         self.screen_indicator = tk.Label(status_cluster, text="○  SCREEN OFF", bg=COLORS["bg"], fg=COLORS["muted"], font=("Cascadia Mono", 8))
         self.screen_indicator.pack(anchor="e", pady=(3, 0))
         tk.Label(status_cluster, text="●  WEB READY", bg=COLORS["bg"], fg=COLORS["green"], font=("Cascadia Mono", 8)).pack(anchor="e", pady=(3, 0))
+        tk.Label(status_cluster, text="●  MEDIA READY" if self.multimodal else "○  MEDIA OFF", bg=COLORS["bg"], fg=COLORS["green"] if self.multimodal else COLORS["muted"], font=("Cascadia Mono", 8)).pack(anchor="e", pady=(3, 0))
         ttk.Button(header, text="API CONFIG", style="Jarvis.TButton", command=self._open_api_config).grid(
             row=0, column=2, rowspan=2, sticky="e"
         )
@@ -298,6 +305,10 @@ class JarvisApp(tk.Tk):
                 response = self._search_web(command[8:].strip())
             elif lowered.startswith("/fetch "):
                 response = self._fetch_web(command[7:].strip())
+            elif lowered.startswith("/image "):
+                response = self._analyze_image_command(command[7:].strip())
+            elif lowered.startswith("/document "):
+                response = self._analyze_document_command(command[10:].strip())
             else:
                 response = self.router.run_tool_loop(command, self.registry.all(), self.dispatcher)
             self.events.put(("response", response or "Action completed."))
@@ -313,6 +324,26 @@ class JarvisApp(tk.Tk):
     def _fetch_web(self, url: str) -> str:
         payload = self.web.fetch_url(url)
         return f"{payload['url']}\n[{payload['content_type']}] retrieved {payload['retrieved_at']}\n\n{payload['content']}"
+
+    def _analyze_image_command(self, value: str) -> str:
+        if self.multimodal is None:
+            raise PermissionError("Configure JARVIS_ALLOWED_ROOTS before analyzing local images")
+        path, prompt = _split_asset_command(value, "Describe this image and identify important details.")
+        payload = self.multimodal.inspect_image(path)
+        provider = self.router.providers.get("gemini")
+        if provider is None or not hasattr(provider, "analyze_image"):
+            raise RuntimeError("Gemini vision provider is unavailable")
+        response = provider.analyze_image(payload.png_bytes, prompt)
+        return f"{payload.path} ({payload.width}x{payload.height})\n\n{response.content}"
+
+    def _analyze_document_command(self, value: str) -> str:
+        if self.multimodal is None:
+            raise PermissionError("Configure JARVIS_ALLOWED_ROOTS before analyzing local documents")
+        path, prompt = _split_asset_command(value, "Summarize this document and list its key points.")
+        payload = self.multimodal.extract_document(path)
+        response = self.router.analyze_document(payload.text, prompt)
+        suffix = " (truncated to the configured limit)" if payload.truncated else ""
+        return f"{payload.path}{suffix}\n\n{response}"
 
     def _analyze_screen(self, prompt: str) -> str:
         if not self.screen.status().active:
@@ -518,6 +549,15 @@ class JarvisApp(tk.Tk):
     def _close(self) -> None:
         self.destroy()
 
+
+
+def _split_asset_command(value: str, default_prompt: str) -> tuple[str, str]:
+    if not value.strip():
+        raise ValueError("Provide a local path")
+    if "|" in value:
+        path, prompt = value.split("|", 1)
+        return path.strip(), prompt.strip() or default_prompt
+    return value.strip(), default_prompt
 
 
 def run_app() -> None:

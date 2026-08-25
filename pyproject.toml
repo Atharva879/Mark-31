@@ -24,6 +24,10 @@ windows = [
   "psutil>=5.9,<8",
   "send2trash>=1.8,<2",
 ]
+multimodal = [
+  "Pillow>=10,<13",
+  "pypdf>=5,<7",
+]
 voice = [
   "faster-whisper>=1.0,<2",
   "pyttsx3>=2.90,<3",

@@ -21,6 +21,7 @@ from skills.files import ScopedFileManager
 from skills.messaging_discord import DiscordClient
 from skills.messaging_whatsapp import WhatsAppDesktopClient
 from skills.mock_tools import echo_status, get_current_time
+from skills.multimodal import MultimodalIngestor
 from skills.web import WebClient
 
 
@@ -39,6 +40,7 @@ def build_runtime(settings: Settings | None = None) -> tuple[LLMRouter, Dispatch
     _register_discord_tools(registry)
     _register_whatsapp_tools(registry)
     _register_web_tools(registry)
+    _register_multimodal_tools(registry, settings)
 
     providers = {
         "gemini": GeminiClient(settings.gemini_api_key, settings.gemini_model, settings.request_timeout_seconds),
@@ -232,6 +234,31 @@ def _register_discord_tools(registry: ToolRegistry) -> None:
             },
             risk=RiskTier.MODERATE,
             handler=client.send_message,
+        )
+    )
+
+
+def _register_multimodal_tools(registry: ToolRegistry, settings: Settings) -> None:
+    if not settings.allowed_roots:
+        return
+    max_bytes = int(os.environ.get("JARVIS_MULTIMODAL_MAX_BYTES", "12000000"))
+    max_chars = int(os.environ.get("JARVIS_DOCUMENT_MAX_CHARS", "80000"))
+    ingestor = MultimodalIngestor(settings.allowed_roots, max_bytes=max_bytes, max_chars=max_chars)
+    registry.register(
+        ToolSpec(
+            name="analyze_local_document",
+            description="Extract bounded text from an allowed local document and analyze it for the user.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "maxLength": 2_000},
+                    "request": {"type": "string", "maxLength": 4_000},
+                },
+                "required": ["path", "request"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.SAFE,
+            handler=lambda path, request: {"document": ingestor.extract_document(path).__dict__, "status": "extracted_for_analysis"},
         )
     )
 
