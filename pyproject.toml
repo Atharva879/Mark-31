@@ -53,5 +53,5 @@ line-length = 100
 target-version = "py311"
 
 [tool.setuptools]
-py-modules = ["audit", "backup", "config", "conversation", "dispatcher", "main", "presence", "safety", "scheduler", "secrets", "startup", "ui", "ui_config", "visual_presence", "permissions", "desktop_control", "notifications", "tray"]
+py-modules = ["audit", "backup", "config", "conversation", "dispatcher", "main", "presence", "safety", "scheduler", "secrets", "startup", "ui", "ui_config", "visual_presence", "permissions", "desktop_control", "notifications", "tray", "automation_orchestrator", "media_publish"]
 packages = ["llm", "skills", "memory"]
