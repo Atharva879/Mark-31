@@ -40,6 +40,7 @@ from workflows import SafeWorkflowEngine, WorkflowStep, WorkflowStore
 from task_loops import AutonomousLoopController, TaskLoopStore
 from startup import StartupManager
 from system_controls import SystemController
+from media_publish import MediaPublisher
 
 
 def build_runtime(
@@ -83,6 +84,7 @@ def build_runtime(
     )
     system_controller = SystemController(allowed_roots=settings.allowed_roots)
     window_manager = WindowManager()
+    media_publisher = MediaPublisher(settings.allowed_roots)
     plugin_catalog = PluginCatalog(Path(os.environ.get("JARVIS_PLUGIN_DIR", "memory/plugins")))
 
     monitor_web = _build_web_client()
@@ -173,10 +175,12 @@ def build_runtime(
     registry.plugin_catalog = plugin_catalog
     registry.system_controller = system_controller
     registry.window_manager = window_manager
+    registry.media_publisher = media_publisher
     registry.loop_controller = loop_controller
     _register_knowledge_tools(registry, knowledge_store)
     _register_system_tools(registry, system_controller)
     _register_window_tools(registry, window_manager)
+    _register_media_tools(registry, media_publisher)
     return router, dispatcher, registry
 
 
@@ -313,6 +317,42 @@ def _run_loop_trigger(trigger, controller, registry):
     )
     completed = int(result.get("completed", 0))
     return f"Autonomous loop completed {completed} iteration(s)", completed > 0, result
+
+
+def _register_media_tools(registry: ToolRegistry, publisher: MediaPublisher) -> None:
+    registry.register(
+        ToolSpec(
+            name="find_latest_video",
+            description="Find the newest supported video in an allowed local folder.",
+            parameters={
+                "type": "object",
+                "properties": {"folder": {"type": "string", "maxLength": 400}},
+                "required": ["folder"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.SAFE,
+            handler=publisher.latest_video,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="prepare_video_publish",
+            description="Prepare a YouTube or Instagram publish plan from an allowed local video; does not publish.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "provider": {"type": "string", "enum": ["youtube", "instagram"]},
+                    "asset_path": {"type": "string", "maxLength": 500},
+                    "title": {"type": "string", "maxLength": 200},
+                    "description": {"type": "string", "maxLength": 5000},
+                },
+                "required": ["provider", "asset_path", "title"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.MODERATE,
+            handler=publisher.prepare,
+        )
+    )
 
 
 def _register_window_tools(registry: ToolRegistry, manager: WindowManager) -> None:
