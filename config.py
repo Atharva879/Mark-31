@@ -31,6 +31,7 @@ class Settings:
     audit_log_path: Path = Path("logs/audit.jsonl")
     memory_db_path: Path = Path("memory/memory.db")
     vector_db_path: Path = Path("memory/memory.vectors.db")
+    scheduler_db_path: Path = Path("memory/scheduler.db")
     allowed_roots: tuple[Path, ...] = field(default_factory=tuple)
 
     @classmethod
@@ -70,6 +71,7 @@ class Settings:
             audit_log_path=Path(env.get("JARVIS_AUDIT_LOG", "logs/audit.jsonl")).expanduser(),
             memory_db_path=Path(env.get("JARVIS_MEMORY_DB", "memory/memory.db")).expanduser(),
             vector_db_path=Path(env.get("JARVIS_VECTOR_DB", "memory/memory.vectors.db")).expanduser(),
+            scheduler_db_path=Path(env.get("JARVIS_SCHEDULER_DB", "memory/scheduler.db")).expanduser(),
             allowed_roots=roots,
         )
 

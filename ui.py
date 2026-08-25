@@ -11,6 +11,7 @@ import base64
 import os
 import queue
 import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -63,6 +64,7 @@ class JarvisApp(tk.Tk):
         self.settings = Settings.from_env()
         self.memory = LongTermMemory(self.settings.memory_db_path, self.settings.vector_db_path)
         self.router, self.dispatcher, self.registry = self._build_runtime()
+        self.scheduler = self.registry.scheduler
         self.screen = ScreenCapture(timeout_seconds=float(os.environ.get("JARVIS_SCREEN_TIMEOUT_SECONDS", "60")))
         self.web = WebClient(
             timeout_seconds=float(os.environ.get("JARVIS_WEB_TIMEOUT_SECONDS", "15")),
@@ -90,6 +92,7 @@ class JarvisApp(tk.Tk):
         self._write_log("SYSTEM", "Paste provider keys from API CONFIG to connect.", COLORS["muted"])
         self._animate_hud()
         self._refresh_telemetry()
+        self.scheduler.start()
         self.after(100, self._drain_events)
 
     def _build_runtime(self):
@@ -160,8 +163,10 @@ class JarvisApp(tk.Tk):
         tk.Label(status_cluster, text="●  WEB READY", bg=COLORS["bg"], fg=COLORS["green"], font=("Cascadia Mono", 8)).pack(anchor="e", pady=(3, 0))
         tk.Label(status_cluster, text="●  MEDIA READY" if self.multimodal else "○  MEDIA OFF", bg=COLORS["bg"], fg=COLORS["green"] if self.multimodal else COLORS["muted"], font=("Cascadia Mono", 8)).pack(anchor="e", pady=(3, 0))
         tk.Label(status_cluster, text="●  AGENTS READY", bg=COLORS["bg"], fg=COLORS["green"], font=("Cascadia Mono", 8)).pack(anchor="e", pady=(3, 0))
+        tk.Label(status_cluster, text="●  SCHEDULES READY", bg=COLORS["bg"], fg=COLORS["green"], font=("Cascadia Mono", 8)).pack(anchor="e", pady=(3, 0))
         actions = tk.Frame(header, bg=COLORS["bg"])
         actions.grid(row=0, column=2, rowspan=2, sticky="e")
+        ttk.Button(actions, text="MONITORS", style="Jarvis.TButton", command=self._open_monitor_manager).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="MEMORY", style="Jarvis.TButton", command=self._open_memory_manager).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="API CONFIG", style="Jarvis.TButton", command=self._open_api_config).pack(side="left")
 
@@ -388,6 +393,14 @@ class JarvisApp(tk.Tk):
                 kind, payload = self.events.get_nowait()
                 if kind == "notification":
                     self._write_log("SYSTEM", str(payload), COLORS["orange"])
+                elif kind == "monitor_records":
+                    self._render_monitor_records(payload)
+                elif kind == "monitor_status":
+                    if hasattr(self, "monitor_status_label") and self.monitor_status_label.winfo_exists():
+                        self.monitor_status_label.configure(text=str(payload), fg=COLORS["muted"])
+                elif kind == "monitor_error":
+                    if hasattr(self, "monitor_status_label") and self.monitor_status_label.winfo_exists():
+                        self.monitor_status_label.configure(text=str(payload), fg=COLORS["red"])
                 elif kind == "memory_records":
                     self._render_memory_records(payload)
                 elif kind == "memory_status":
@@ -523,6 +536,170 @@ class JarvisApp(tk.Tk):
         self._animation_tick = (self._animation_tick + 1) % 10000
         self._draw_hud()
         self.after(90, self._animate_hud)
+
+    def _open_monitor_manager(self) -> None:
+        if getattr(self, "monitor_window", None) is not None and self.monitor_window.winfo_exists():
+            self.monitor_window.deiconify()
+            self.monitor_window.lift()
+            self._monitor_refresh()
+            return
+        window = tk.Toplevel(self)
+        self.monitor_window = window
+        window.title("JARVIS // MONITORS AND SCHEDULES")
+        window.configure(bg=COLORS["bg"])
+        window.geometry("1080x720")
+        window.minsize(860, 560)
+        window.transient(self)
+        window.protocol("WM_DELETE_WINDOW", self._close_monitor_manager)
+        tk.Label(window, text="MONITORS AND SCHEDULES", bg=COLORS["bg"], fg=COLORS["cyan"], font=("Segoe UI", 19, "bold")).pack(anchor="w", padx=24, pady=(22, 3))
+        tk.Label(window, text="Read-only web/file monitors run only while this desktop app is open. Sensitive actions never run unattended.", bg=COLORS["bg"], fg=COLORS["muted"], font=("Segoe UI", 9)).pack(anchor="w", padx=24, pady=(0, 16))
+
+        form = tk.Frame(window, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1)
+        form.pack(fill="x", padx=24, pady=(0, 12))
+        self.monitor_name_var = tk.StringVar(value="")
+        self.monitor_kind_var = tk.StringVar(value="web_url")
+        self.monitor_interval_var = tk.StringVar(value="60")
+        self.monitor_target_var = tk.StringVar(value="")
+        fields = (("NAME", self.monitor_name_var, 20), ("TARGET URL, ALLOWED FILE, OR REMINDER", self.monitor_target_var, 48))
+        for column, (label, variable, width) in enumerate(fields):
+            block = tk.Frame(form, bg=COLORS["panel"])
+            block.grid(row=0, column=column, sticky="ew", padx=(14 if column == 0 else 8, 8), pady=12)
+            tk.Label(block, text=label, bg=COLORS["panel"], fg=COLORS["muted"], font=("Consolas", 8, "bold")).pack(anchor="w")
+            tk.Entry(block, textvariable=variable, width=width, bg="#0d2030", fg=COLORS["text"], insertbackground=COLORS["cyan"], relief="flat", font=("Segoe UI", 9)).pack(fill="x", ipady=6, pady=(4, 0))
+        type_block = tk.Frame(form, bg=COLORS["panel"])
+        type_block.grid(row=1, column=0, sticky="w", padx=14, pady=(0, 12))
+        tk.Label(type_block, text="TYPE", bg=COLORS["panel"], fg=COLORS["muted"], font=("Consolas", 8, "bold")).pack(anchor="w")
+        ttk.Combobox(type_block, textvariable=self.monitor_kind_var, values=("web_url", "file", "reminder"), state="readonly", width=14).pack(pady=(4, 0))
+        interval_block = tk.Frame(form, bg=COLORS["panel"])
+        interval_block.grid(row=1, column=1, sticky="w", padx=8, pady=(0, 12))
+        tk.Label(interval_block, text="INTERVAL (SECONDS, MIN 60)", bg=COLORS["panel"], fg=COLORS["muted"], font=("Consolas", 8, "bold")).pack(anchor="w")
+        tk.Spinbox(interval_block, from_=60, to=604800, textvariable=self.monitor_interval_var, width=14, bg="#0d2030", fg=COLORS["text"], buttonbackground=COLORS["panel_alt"], relief="flat", font=("Segoe UI", 9)).pack(pady=(4, 0), ipady=4)
+        ttk.Button(form, text="CREATE MONITOR", style="Jarvis.TButton", command=self._monitor_create).grid(row=1, column=2, sticky="e", padx=14, pady=(0, 12))
+        form.grid_columnconfigure(0, weight=1)
+        form.grid_columnconfigure(1, weight=2)
+        form.grid_columnconfigure(2, weight=1)
+
+        table_frame = tk.Frame(window, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1)
+        table_frame.pack(fill="both", expand=True, padx=24, pady=(0, 12))
+        columns = ("id", "name", "kind", "enabled", "interval", "next", "last")
+        self.monitor_tree = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="browse")
+        headings = {"id": "ID", "name": "NAME", "kind": "TYPE", "enabled": "STATE", "interval": "SECONDS", "next": "NEXT RUN", "last": "LAST RESULT"}
+        widths = {"id": 90, "name": 180, "kind": 90, "enabled": 80, "interval": 80, "next": 160, "last": 220}
+        for column in columns:
+            self.monitor_tree.heading(column, text=headings[column])
+            self.monitor_tree.column(column, width=widths[column], anchor="w")
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.monitor_tree.yview)
+        self.monitor_tree.configure(yscrollcommand=scrollbar.set)
+        self.monitor_tree.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=10)
+        scrollbar.pack(side="right", fill="y", padx=(0, 10), pady=10)
+
+        footer = tk.Frame(window, bg=COLORS["bg"])
+        footer.pack(fill="x", padx=24, pady=(0, 20))
+        self.monitor_status_label = tk.Label(footer, text="Loading scheduler status...", bg=COLORS["bg"], fg=COLORS["muted"], font=("Cascadia Mono", 8))
+        self.monitor_status_label.pack(side="left")
+        ttk.Button(footer, text="REFRESH", style="Jarvis.TButton", command=self._monitor_refresh).pack(side="right", padx=(8, 0))
+        ttk.Button(footer, text="RUN NOW", style="Jarvis.TButton", command=self._monitor_run_now).pack(side="right", padx=(8, 0))
+        ttk.Button(footer, text="PAUSE / RESUME", style="Jarvis.TButton", command=self._monitor_toggle).pack(side="right", padx=(8, 0))
+        ttk.Button(footer, text="DELETE", style="Jarvis.TButton", command=self._monitor_delete).pack(side="right", padx=(8, 0))
+        ttk.Button(footer, text="CLOSE", style="Jarvis.TButton", command=self._close_monitor_manager).pack(side="right")
+        self._monitor_refresh()
+
+    def _close_monitor_manager(self) -> None:
+        if getattr(self, "monitor_window", None) is not None and self.monitor_window.winfo_exists():
+            self.monitor_window.destroy()
+        self.monitor_window = None
+
+    def _monitor_selected_id(self) -> str | None:
+        selection = self.monitor_tree.selection() if hasattr(self, "monitor_tree") else ()
+        return str(selection[0]) if selection else None
+
+    def _monitor_refresh(self) -> None:
+        if getattr(self, "monitor_window", None) is None or not self.monitor_window.winfo_exists():
+            return
+        self.monitor_status_label.configure(text="Loading monitor definitions and run history...", fg=COLORS["muted"])
+        threading.Thread(target=self._monitor_refresh_worker, daemon=True).start()
+
+    def _monitor_refresh_worker(self) -> None:
+        try:
+            triggers = self.scheduler.list()
+            runs = self.scheduler.store.recent_runs(100)
+            status = self.scheduler.status()
+            self.events.put(("monitor_records", {"triggers": triggers, "runs": runs}))
+            self.events.put(("monitor_status", f"{'RUNNING' if status['running'] else 'STOPPED'} // {status['enabled']}/{status['total']} enabled // local app lifetime only"))
+        except Exception as exc:
+            self.events.put(("monitor_error", f"Monitor refresh failed: {type(exc).__name__}: {exc}"))
+
+    def _render_monitor_records(self, payload: object) -> None:
+        if not hasattr(self, "monitor_tree") or not self.monitor_tree.winfo_exists() or not isinstance(payload, dict):
+            return
+        runs = payload.get("runs", [])
+        latest = {}
+        for run in runs:
+            if isinstance(run, dict) and run.get("trigger_id") not in latest:
+                latest[run.get("trigger_id")] = f"{run.get('status', '—')}: {str(run.get('summary', ''))[:150]}"
+        for item in self.monitor_tree.get_children():
+            self.monitor_tree.delete(item)
+        for trigger in payload.get("triggers", []):
+            if not isinstance(trigger, dict):
+                continue
+            next_run = trigger.get("next_run_at")
+            next_text = time.strftime("%Y-%m-%d %H:%M", time.localtime(float(next_run))) if next_run else "—"
+            self.monitor_tree.insert("", "end", iid=str(trigger.get("trigger_id")), values=(trigger.get("trigger_id"), trigger.get("name"), trigger.get("kind"), "ENABLED" if trigger.get("enabled") else "PAUSED", trigger.get("interval_seconds"), next_text, latest.get(trigger.get("trigger_id"), "—")))
+
+    def _monitor_create(self) -> None:
+        try:
+            name = self.monitor_name_var.get().strip()
+            kind = self.monitor_kind_var.get().strip()
+            interval = int(self.monitor_interval_var.get())
+            target = self.monitor_target_var.get().strip()
+            payload = {"url": target} if kind == "web_url" else {"path": target} if kind == "file" else {"message": target}
+            result = self.dispatcher.dispatch("create_monitor_trigger", {"name": name, "kind": kind, "interval_seconds": interval, "payload": payload})
+            if result.error:
+                raise RuntimeError(result.error)
+            self.monitor_name_var.set("")
+            self.monitor_target_var.set("")
+            self._monitor_refresh()
+        except Exception as exc:
+            messagebox.showerror("Create monitor", str(exc), parent=self.monitor_window)
+
+    def _monitor_toggle(self) -> None:
+        trigger_id = self._monitor_selected_id()
+        if not trigger_id:
+            messagebox.showinfo("Monitor", "Select a monitor first.", parent=self.monitor_window)
+            return
+        values = self.monitor_tree.item(trigger_id, "values")
+        enabled = str(values[3]) != "ENABLED"
+        result = self.dispatcher.dispatch("set_monitor_enabled", {"trigger_id": trigger_id, "enabled": enabled})
+        if result.error:
+            messagebox.showerror("Monitor", result.error, parent=self.monitor_window)
+        self._monitor_refresh()
+
+    def _monitor_run_now(self) -> None:
+        trigger_id = self._monitor_selected_id()
+        if not trigger_id:
+            messagebox.showinfo("Monitor", "Select a monitor first.", parent=self.monitor_window)
+            return
+        self.monitor_status_label.configure(text="Running monitor in background...", fg=COLORS["orange"])
+        threading.Thread(target=self._monitor_run_worker, args=(trigger_id,), daemon=True).start()
+
+    def _monitor_run_worker(self, trigger_id: str) -> None:
+        try:
+            result = self.dispatcher.dispatch("run_monitor_now", {"trigger_id": trigger_id})
+            self.events.put(("monitor_status", f"Run complete: {result.error or result.output}"))
+            self.events.put(("notification", f"Manual monitor run completed for {trigger_id}."))
+            self._monitor_refresh_worker()
+        except Exception as exc:
+            self.events.put(("monitor_error", f"Monitor run failed: {type(exc).__name__}: {exc}"))
+
+    def _monitor_delete(self) -> None:
+        trigger_id = self._monitor_selected_id()
+        if not trigger_id:
+            messagebox.showinfo("Monitor", "Select a monitor first.", parent=self.monitor_window)
+            return
+        result = self.dispatcher.dispatch("delete_monitor_trigger", {"trigger_id": trigger_id})
+        if result.error:
+            messagebox.showerror("Delete monitor", result.error, parent=self.monitor_window)
+        self._monitor_refresh()
 
     def _open_memory_manager(self) -> None:
         if self.memory_window is not None and self.memory_window.winfo_exists():
@@ -727,7 +904,10 @@ class JarvisApp(tk.Tk):
             write_local_env(gemini_key.strip(), openrouter_key.strip(), order.strip(), gemini_model.strip(), openrouter_model.strip(), local_model.strip(), local_url.strip())
             os.environ.update({"GEMINI_API_KEY": gemini_key.strip(), "OPENROUTER_API_KEY": openrouter_key.strip(), "JARVIS_PROVIDER_ORDER": order.strip(), "GEMINI_MODEL": gemini_model.strip(), "OPENROUTER_MODEL": openrouter_model.strip(), "JARVIS_LOCAL_MODEL": local_model.strip(), "JARVIS_LOCAL_BASE_URL": local_url.strip()})
             self.settings = new_settings
+            self.scheduler.stop()
             self.router, self.dispatcher, self.registry = self._build_runtime()
+            self.scheduler = self.registry.scheduler
+            self.scheduler.start()
             self.connection_label.configure(text="●  CONFIGURED", fg=COLORS["green"])
             self._write_log("SYSTEM", "Provider configuration saved locally and applied.", COLORS["green"])
             window.destroy()
@@ -735,6 +915,7 @@ class JarvisApp(tk.Tk):
             messagebox.showerror("Configuration error", str(exc), parent=window)
 
     def _close(self) -> None:
+        self.scheduler.stop()
         self.destroy()
 
 
