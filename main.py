@@ -41,6 +41,7 @@ from task_loops import AutonomousLoopController, TaskLoopStore
 from startup import StartupManager
 from system_controls import SystemController
 from media_publish import MediaPublisher
+from automation_orchestrator import AutomationOrchestrator
 
 
 def build_runtime(
@@ -84,6 +85,7 @@ def build_runtime(
     )
     system_controller = SystemController(allowed_roots=settings.allowed_roots)
     window_manager = WindowManager()
+    automation_orchestrator = AutomationOrchestrator({"windows": window_manager})
     media_publisher = MediaPublisher(settings.allowed_roots)
     plugin_catalog = PluginCatalog(Path(os.environ.get("JARVIS_PLUGIN_DIR", "memory/plugins")))
 
@@ -175,6 +177,7 @@ def build_runtime(
     registry.plugin_catalog = plugin_catalog
     registry.system_controller = system_controller
     registry.window_manager = window_manager
+    registry.automation_orchestrator = automation_orchestrator
     registry.media_publisher = media_publisher
     registry.loop_controller = loop_controller
     _register_knowledge_tools(registry, knowledge_store)
