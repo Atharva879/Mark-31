@@ -21,6 +21,7 @@ from skills.files import ScopedFileManager
 from skills.messaging_discord import DiscordClient
 from skills.messaging_whatsapp import WhatsAppDesktopClient
 from skills.mock_tools import echo_status, get_current_time
+from skills.web import WebClient
 
 
 def build_runtime(settings: Settings | None = None) -> tuple[LLMRouter, Dispatcher, ToolRegistry]:
@@ -37,6 +38,7 @@ def build_runtime(settings: Settings | None = None) -> tuple[LLMRouter, Dispatch
     _register_application_tools(registry, _load_applications())
     _register_discord_tools(registry)
     _register_whatsapp_tools(registry)
+    _register_web_tools(registry)
 
     providers = {
         "gemini": GeminiClient(settings.gemini_api_key, settings.gemini_model, settings.request_timeout_seconds),
@@ -230,6 +232,48 @@ def _register_discord_tools(registry: ToolRegistry) -> None:
             },
             risk=RiskTier.MODERATE,
             handler=client.send_message,
+        )
+    )
+
+
+def _register_web_tools(registry: ToolRegistry) -> None:
+    max_results = int(os.environ.get("JARVIS_WEB_MAX_RESULTS", "5"))
+    max_bytes = int(os.environ.get("JARVIS_WEB_MAX_RESPONSE_BYTES", "1000000"))
+    timeout = float(os.environ.get("JARVIS_WEB_TIMEOUT_SECONDS", "15"))
+    allowed_hosts = {item.strip().lower() for item in os.environ.get("JARVIS_WEB_ALLOWED_HOSTS", "").split(",") if item.strip()}
+    client = WebClient(timeout_seconds=timeout, max_response_bytes=max_bytes, max_results=max_results, allowed_hosts=allowed_hosts)
+    registry.register(
+        ToolSpec(
+            name="web_search",
+            description="Search public web results and return bounded titles, URLs, and snippets.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "maxLength": 500},
+                    "max_results": {"type": "integer", "minimum": 1, "maximum": 20},
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.SAFE,
+            handler=lambda query, max_results=None: client.search(query, max_results),
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="fetch_web_data",
+            description="Fetch current public text or JSON from an absolute HTTP(S) URL with SSRF protection and size limits.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "maxLength": 2_000},
+                    "max_chars": {"type": "integer", "minimum": 1, "maximum": 100_000},
+                },
+                "required": ["url"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.SAFE,
+            handler=lambda url, max_chars=12_000: client.fetch_url(url, max_chars),
         )
     )
 
