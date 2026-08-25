@@ -31,6 +31,7 @@ The repository currently contains the first vertical slice:
 | Agent shell and browser tools | Implemented with shell allowlists, confirmations, limits, and read-only web navigation |
 | Advanced file management and code sandbox | Implemented with scoped search, metadata, hashing, archive inspection, and isolated pure-Python runs |
 | Long-term vector memory | Implemented with a local SQLite vector index and offline deterministic embeddings |
+| Memory Management panel | Implemented in the desktop UI for inspect, search, reindex, and confirmed deletion |
 | Scheduler/clipboard integrations | Planned for later milestones |
 | SimilarWeb analytics adapter | Planned for Milestone 10; credential/API boundary must be confirmed |
 
@@ -73,6 +74,8 @@ Agent tool-calling now includes `run_shell_command` and `browse_web_page`. Shell
 Advanced file tools include `find_files`, `file_metadata`, `hash_file_sha256`, and `inspect_archive`. They remain rooted at `JARVIS_ALLOWED_ROOTS`; archive inspection only lists members and flags traversal-style names without extraction. `run_python_sandbox` executes small pure-Python calculations in a short-lived isolated subprocess, with AST restrictions, no imports or file/network APIs, a timeout, output cap, temporary working directory, and a POSIX memory/file-size limit. Sandbox execution is `SENSITIVE` and requires confirmation. Sandbox source is fingerprinted rather than written verbatim to audit logs.
 
 Long-term memory stores the existing explicit notes and facts in SQLite and maintains a second local SQLite vector index in `JARVIS_VECTOR_DB`. The default embedding is deterministic and offline, so memory content is not sent to a remote embedding service. Use `semantic_recall_memory` for bounded similarity search and `reindex_memory` to rebuild the vector index if it is deleted or becomes inconsistent. Forgetting a memory removes both the record and its vector entry; the existing lexical `recall_memory` tool remains available.
+
+The desktop UI now includes a `MEMORY` button that opens the Memory Management panel. It displays durable records, type, tags, similarity score, and per-record vector status; supports semantic or lexical search; allows explicit reindexing; and requires a confirmation dialog before deleting a selected memory. Operations run off the Tkinter event thread so the main HUD remains responsive.
 
 The current build includes persistent memory and registers file tools when `JARVIS_ALLOWED_ROOTS` is configured. Application tools are always present but require an allowlist and a Windows host; they fail closed on other operating systems. The first milestone does not require Windows-only dependencies because the application adapter is not executable on the sandbox and file tools remain disabled until roots are configured. Install the Windows extras only when those integrations are being implemented:
 

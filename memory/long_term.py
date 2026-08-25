@@ -40,6 +40,9 @@ class LongTermMemory:
     def recent(self, limit: int = 10) -> list[dict[str, Any]]:
         return self.store.recent(limit)
 
+    def vector_exists(self, memory_id: int) -> bool:
+        return self.vectors.contains(memory_id)
+
     def forget(self, memory_id: int) -> bool:
         deleted = self.store.forget(memory_id)
         self.vectors.delete(memory_id)

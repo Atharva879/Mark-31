@@ -22,6 +22,7 @@ from skills.screen import ScreenCapture
 from skills.voice import SpeechSynthesizer, VoiceInput
 from skills.web import WebClient
 from skills.multimodal import MultimodalIngestor
+from memory.long_term import LongTermMemory
 from ui_config import write_local_env
 
 try:
@@ -56,9 +57,12 @@ class JarvisApp(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._close)
         self.chat_mode = False
         self.chat_window: tk.Toplevel | None = None
+        self.memory_window: tk.Toplevel | None = None
+        self.memory_records: list[dict[str, object]] = []
 
         self.settings = Settings.from_env()
-        self.router, self.dispatcher, self.registry = build_runtime(self.settings)
+        self.memory = LongTermMemory(self.settings.memory_db_path, self.settings.vector_db_path)
+        self.router, self.dispatcher, self.registry = self._build_runtime()
         self.screen = ScreenCapture(timeout_seconds=float(os.environ.get("JARVIS_SCREEN_TIMEOUT_SECONDS", "60")))
         self.web = WebClient(
             timeout_seconds=float(os.environ.get("JARVIS_WEB_TIMEOUT_SECONDS", "15")),
@@ -87,6 +91,16 @@ class JarvisApp(tk.Tk):
         self._animate_hud()
         self._refresh_telemetry()
         self.after(100, self._drain_events)
+
+    def _build_runtime(self):
+        return build_runtime(self.settings, confirm=self._confirm_sensitive_action, notify=self._notify_tool)
+
+    def _confirm_sensitive_action(self, prompt: str) -> bool:
+        return messagebox.askyesno("Confirm sensitive action", prompt, parent=self)
+
+    def _notify_tool(self, message: str) -> None:
+        if hasattr(self, "activity"):
+            self._write_log("SYSTEM", message, COLORS["orange"])
 
     def _build_styles(self) -> None:
         style = ttk.Style(self)
@@ -146,9 +160,10 @@ class JarvisApp(tk.Tk):
         self.screen_indicator.pack(anchor="e", pady=(3, 0))
         tk.Label(status_cluster, text="●  WEB READY", bg=COLORS["bg"], fg=COLORS["green"], font=("Cascadia Mono", 8)).pack(anchor="e", pady=(3, 0))
         tk.Label(status_cluster, text="●  MEDIA READY" if self.multimodal else "○  MEDIA OFF", bg=COLORS["bg"], fg=COLORS["green"] if self.multimodal else COLORS["muted"], font=("Cascadia Mono", 8)).pack(anchor="e", pady=(3, 0))
-        ttk.Button(header, text="API CONFIG", style="Jarvis.TButton", command=self._open_api_config).grid(
-            row=0, column=2, rowspan=2, sticky="e"
-        )
+        actions = tk.Frame(header, bg=COLORS["bg"])
+        actions.grid(row=0, column=2, rowspan=2, sticky="e")
+        ttk.Button(actions, text="MEMORY", style="Jarvis.TButton", command=self._open_memory_manager).pack(side="left", padx=(0, 8))
+        ttk.Button(actions, text="API CONFIG", style="Jarvis.TButton", command=self._open_api_config).pack(side="left")
 
     def _panel(self, parent: tk.Misc, title: str) -> tk.Frame:
         frame = tk.Frame(parent, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1)
@@ -371,7 +386,15 @@ class JarvisApp(tk.Tk):
         try:
             while True:
                 kind, payload = self.events.get_nowait()
-                if kind == "response":
+                if kind == "memory_records":
+                    self._render_memory_records(payload)
+                elif kind == "memory_status":
+                    if hasattr(self, "memory_status_label") and self.memory_status_label.winfo_exists():
+                        self.memory_status_label.configure(text=str(payload), fg=COLORS["muted"])
+                elif kind == "memory_error":
+                    if hasattr(self, "memory_status_label") and self.memory_status_label.winfo_exists():
+                        self.memory_status_label.configure(text=str(payload), fg=COLORS["red"])
+                elif kind == "response":
                     self._write_log("JARVIS", str(payload), COLORS["green"])
                     if self.voice_request_active:
                         self._set_state("SPEAKING", "VOICE RESPONSE")
@@ -499,6 +522,154 @@ class JarvisApp(tk.Tk):
         self._draw_hud()
         self.after(90, self._animate_hud)
 
+    def _open_memory_manager(self) -> None:
+        if self.memory_window is not None and self.memory_window.winfo_exists():
+            self.memory_window.deiconify()
+            self.memory_window.lift()
+            return
+        window = tk.Toplevel(self)
+        self.memory_window = window
+        window.title("JARVIS // MEMORY MANAGEMENT")
+        window.configure(bg=COLORS["bg"])
+        window.geometry("980x650")
+        window.minsize(760, 500)
+        window.transient(self)
+        window.protocol("WM_DELETE_WINDOW", self._close_memory_manager)
+
+        heading = tk.Frame(window, bg=COLORS["bg"])
+        heading.pack(fill="x", padx=24, pady=(22, 8))
+        tk.Label(heading, text="MEMORY MANAGEMENT", bg=COLORS["bg"], fg=COLORS["cyan"], font=("Segoe UI", 19, "bold")).pack(anchor="w")
+        tk.Label(heading, text="Inspect durable facts and their local vector index. Deletion is permanent and requires confirmation.", bg=COLORS["bg"], fg=COLORS["muted"], font=("Segoe UI", 9)).pack(anchor="w", pady=(3, 0))
+
+        search = tk.Frame(window, bg=COLORS["bg"])
+        search.pack(fill="x", padx=24, pady=(8, 12))
+        self.memory_query = tk.StringVar()
+        query_entry = tk.Entry(search, textvariable=self.memory_query, bg="#0d2030", fg=COLORS["text"], insertbackground=COLORS["cyan"], relief="flat", font=("Segoe UI", 10))
+        query_entry.pack(side="left", fill="x", expand=True, ipady=9)
+        query_entry.bind("<Return>", lambda _event: self._memory_search())
+        self.memory_mode = tk.StringVar(value="SEMANTIC")
+        ttk.Combobox(search, textvariable=self.memory_mode, values=("SEMANTIC", "LEXICAL"), state="readonly", width=11).pack(side="left", padx=8)
+        ttk.Button(search, text="SEARCH", style="Jarvis.TButton", command=self._memory_search).pack(side="left")
+
+        table_frame = tk.Frame(window, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1)
+        table_frame.pack(fill="both", expand=True, padx=24, pady=(0, 12))
+        columns = ("id", "kind", "content", "tags", "score", "vector")
+        self.memory_tree = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="browse")
+        headings = {"id": "ID", "kind": "TYPE", "content": "CONTENT", "tags": "TAGS", "score": "SIMILARITY", "vector": "VECTOR"}
+        widths = {"id": 55, "kind": 70, "content": 390, "tags": 130, "score": 90, "vector": 80}
+        for column in columns:
+            self.memory_tree.heading(column, text=headings[column])
+            self.memory_tree.column(column, width=widths[column], anchor="w")
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.memory_tree.yview)
+        self.memory_tree.configure(yscrollcommand=scrollbar.set)
+        self.memory_tree.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=10)
+        scrollbar.pack(side="right", fill="y", padx=(0, 10), pady=10)
+        self.memory_tree.bind("<Double-1>", lambda _event: self._show_memory_detail())
+
+        footer = tk.Frame(window, bg=COLORS["bg"])
+        footer.pack(fill="x", padx=24, pady=(0, 20))
+        self.memory_status_label = tk.Label(footer, text="Loading memory index...", bg=COLORS["bg"], fg=COLORS["muted"], font=("Cascadia Mono", 8))
+        self.memory_status_label.pack(side="left")
+        ttk.Button(footer, text="REFRESH", style="Jarvis.TButton", command=self._memory_refresh).pack(side="right", padx=(8, 0))
+        ttk.Button(footer, text="REINDEX", style="Jarvis.TButton", command=self._memory_reindex).pack(side="right", padx=(8, 0))
+        ttk.Button(footer, text="DELETE SELECTED", style="Jarvis.TButton", command=self._memory_delete_selected).pack(side="right", padx=(8, 0))
+        ttk.Button(footer, text="CLOSE", style="Jarvis.TButton", command=self._close_memory_manager).pack(side="right")
+        self._memory_refresh()
+
+    def _close_memory_manager(self) -> None:
+        if self.memory_window is not None and self.memory_window.winfo_exists():
+            self.memory_window.destroy()
+        self.memory_window = None
+
+    def _memory_refresh(self) -> None:
+        if self.memory_window is None or not self.memory_window.winfo_exists():
+            return
+        self.memory_query.set("")
+        self.memory_status_label.configure(text="Loading memory records...", fg=COLORS["muted"])
+        threading.Thread(target=self._memory_refresh_worker, daemon=True).start()
+
+    def _memory_refresh_worker(self) -> None:
+        try:
+            records = self.memory.recent(100)
+            self.events.put(("memory_records", records))
+            stats = self.memory.stats()
+            self.events.put(("memory_status", f"{stats['memory_records']} records  //  {stats['vector_records']} vectors  //  local index"))
+        except Exception as exc:
+            self.events.put(("memory_error", f"Memory refresh failed: {type(exc).__name__}: {exc}"))
+
+    def _memory_search(self) -> None:
+        query = self.memory_query.get().strip()
+        if not query:
+            self._memory_refresh()
+            return
+        mode = self.memory_mode.get()
+        self.memory_status_label.configure(text=f"Searching {mode.lower()} memory...", fg=COLORS["muted"])
+        threading.Thread(target=self._memory_search_worker, args=(query, mode), daemon=True).start()
+
+    def _memory_search_worker(self, query: str, mode: str) -> None:
+        try:
+            records = self.memory.semantic_recall(query, 100, 0.0) if mode == "SEMANTIC" else self.memory.recall(query, 100)
+            self.events.put(("memory_records", records))
+            self.events.put(("memory_status", f"{len(records)} {mode.lower()} matches"))
+        except Exception as exc:
+            self.events.put(("memory_error", f"Memory search failed: {type(exc).__name__}: {exc}"))
+
+    def _render_memory_records(self, records: object) -> None:
+        if not hasattr(self, "memory_tree") or not self.memory_tree.winfo_exists():
+            return
+        self.memory_records = list(records) if isinstance(records, list) else []
+        for item in self.memory_tree.get_children():
+            self.memory_tree.delete(item)
+        for index, record in enumerate(self.memory_records):
+            score = record.get("similarity", "—") if isinstance(record, dict) else "—"
+            self.memory_tree.insert("", "end", iid=str(index), values=(
+                record.get("id", "—"), record.get("kind", "—"), str(record.get("content", ""))[:240],
+                str(record.get("tags", ""))[:80], score, "INDEXED" if self.memory.vector_exists(int(record["id"])) else "MISSING",
+            ))
+
+    def _show_memory_detail(self) -> None:
+        selection = self.memory_tree.selection() if hasattr(self, "memory_tree") else ()
+        if not selection:
+            return
+        record = self.memory_records[int(selection[0])]
+        detail = "\\n".join(f"{key.upper()}: {value}" for key, value in record.items())
+        messagebox.showinfo("Memory record", detail, parent=self.memory_window)
+
+    def _memory_reindex(self) -> None:
+        if not messagebox.askyesno("Reindex memory", "Rebuild the local vector index from all durable memory records?", parent=self.memory_window):
+            return
+        self.memory_status_label.configure(text="Rebuilding vector index...", fg=COLORS["orange"])
+        threading.Thread(target=self._memory_reindex_worker, daemon=True).start()
+
+    def _memory_reindex_worker(self) -> None:
+        try:
+            count = self.memory.reindex()
+            self.events.put(("memory_status", f"Reindexed {count} records successfully"))
+            self.events.put(("memory_records", self.memory.recent(100)))
+        except Exception as exc:
+            self.events.put(("memory_error", f"Reindex failed: {type(exc).__name__}: {exc}"))
+
+    def _memory_delete_selected(self) -> None:
+        selection = self.memory_tree.selection() if hasattr(self, "memory_tree") else ()
+        if not selection:
+            messagebox.showinfo("Delete memory", "Select a memory record first.", parent=self.memory_window)
+            return
+        record = self.memory_records[int(selection[0])]
+        memory_id = int(record["id"])
+        preview = str(record.get("content", ""))[:160]
+        if not messagebox.askyesno("Delete memory", f"Permanently delete memory #{memory_id}?\\n\\n{preview}", parent=self.memory_window):
+            return
+        self.memory_status_label.configure(text=f"Deleting memory #{memory_id}...", fg=COLORS["orange"])
+        threading.Thread(target=self._memory_delete_worker, args=(memory_id,), daemon=True).start()
+
+    def _memory_delete_worker(self, memory_id: int) -> None:
+        try:
+            deleted = self.memory.forget(memory_id)
+            self.events.put(("memory_status", f"Memory #{memory_id} deleted" if deleted else f"Memory #{memory_id} was not found"))
+            self.events.put(("memory_records", self.memory.recent(100)))
+        except Exception as exc:
+            self.events.put(("memory_error", f"Delete failed: {type(exc).__name__}: {exc}"))
+
     def _open_api_config(self) -> None:
         window = tk.Toplevel(self)
         window.title("JARVIS // API CONFIGURATION")
@@ -539,7 +710,7 @@ class JarvisApp(tk.Tk):
             write_local_env(gemini_key.strip(), openrouter_key.strip(), order.strip())
             os.environ.update({"GEMINI_API_KEY": gemini_key.strip(), "OPENROUTER_API_KEY": openrouter_key.strip(), "JARVIS_PROVIDER_ORDER": order.strip()})
             self.settings = new_settings
-            self.router, self.dispatcher, self.registry = build_runtime(self.settings)
+            self.router, self.dispatcher, self.registry = self._build_runtime()
             self.connection_label.configure(text="●  CONFIGURED", fg=COLORS["green"])
             self._write_log("SYSTEM", "Provider configuration saved locally and applied.", COLORS["green"])
             window.destroy()

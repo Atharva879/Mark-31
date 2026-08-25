@@ -61,6 +61,8 @@ Advanced file management adds recursive search, metadata, SHA-256 hashing, and a
 
 Long-term memory composes the explicit SQLite `memories` table with a separate SQLite `memory_vectors` table. `HashEmbedding` provides deterministic offline feature-hash vectors, avoiding a network dependency or remote transmission of private memories. `LongTermMemory` updates both stores on writes, removes the vector on forget, supports bounded cosine-style similarity ranking, and can rebuild the vector index from the canonical SQLite records through the moderate-risk `reindex_memory` tool. The vector database is a derived index; the SQLite memory table remains the source of truth.
 
+The desktop Memory Management panel uses the same `LongTermMemory` facade as the agent tools. It loads recent records asynchronously, supports semantic and lexical search, displays similarity and per-record vector presence, and refreshes after reindex or deletion. Deletion is a UI confirmation flow followed by a synchronized record/vector removal; the Tkinter event queue receives worker results so SQLite operations do not freeze the HUD.
+
 ## Current implemented slice
 
 The current branch includes a SQLite memory store, a scoped filesystem adapter, and an allowlisted application controller in addition to the original LLM router and dispatcher. Memory operations are explicit: notes and facts are written only through registered tools, recall is bounded, and forgetting a memory is sensitive. File operations require configured roots, enforce size limits, reject binary reads, and expose deletion only as a Recycle Bin move. Application control accepts configured executable paths only and fails closed on non-Windows hosts.
