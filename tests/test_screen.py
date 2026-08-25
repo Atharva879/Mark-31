@@ -23,7 +23,9 @@ def test_screen_capture_requires_explicit_enablement():
 
 def test_screen_capture_is_in_memory_and_expires():
     clock = FakeClock()
-    screen = ScreenCapture(timeout_seconds=10, capture_factory=lambda: b"PNG", clock=clock)
+    screen = ScreenCapture(
+        timeout_seconds=10, capture_factory=lambda: b"PNG", clock=clock, auto_expire=True
+    )
     status = screen.enable("user_toggle")
 
     assert status.active is True
@@ -31,8 +33,18 @@ def test_screen_capture_is_in_memory_and_expires():
 
     clock.value = 111.0
     assert screen.status().active is False
-    with pytest.raises(PermissionError, match="timed out"):
+    with pytest.raises(PermissionError, match="disabled"):
         screen.capture_png_base64()
+
+
+def test_screen_capture_stays_enabled_until_manual_disable():
+    clock = FakeClock()
+    screen = ScreenCapture(timeout_seconds=10, capture_factory=lambda: b"PNG", clock=clock)
+    screen.enable("explicit_user_choice")
+    clock.value = 10_000
+    assert screen.status().active is True
+    screen.disable("manual_stop")
+    assert screen.status().active is False
 
 
 def test_screen_capture_rejects_oversized_payload():

@@ -30,6 +30,7 @@ class CameraCapture:
         device_index: int = 0,
         capture_factory: Callable[[], Any] | None = None,
         clock: Callable[[], float] = time.monotonic,
+        auto_expire: bool = False,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("Camera timeout must be greater than zero")
@@ -39,6 +40,7 @@ class CameraCapture:
         self.device_index = device_index
         self.capture_factory = capture_factory
         self.clock = clock
+        self.auto_expire = bool(auto_expire)
         self._enabled = False
         self._expires_at: float | None = None
         self._reason = "disabled"
@@ -47,7 +49,7 @@ class CameraCapture:
     def enable(self, reason: str = "user_request") -> CameraStatus:
         with self._lock:
             self._enabled = True
-            self._expires_at = self.clock() + self.timeout_seconds
+            self._expires_at = self.clock() + self.timeout_seconds if self.auto_expire else None
             self._reason = str(reason)[:200]
             return self.status()
 
@@ -73,7 +75,7 @@ class CameraCapture:
         with self._lock:
             self._expire_if_needed()
             if not self._enabled:
-                raise PermissionError("Camera awareness is disabled or has timed out")
+                raise PermissionError("Camera awareness is disabled")
             if os.name != "nt" and self.capture_factory is None:
                 raise RuntimeError("Camera capture requires a configured desktop camera backend")
             image_bytes = self._capture_png()
@@ -108,7 +110,12 @@ class CameraCapture:
                 capture.release()
 
     def _expire_if_needed(self) -> None:
-        if self._enabled and self._expires_at is not None and self.clock() >= self._expires_at:
+        if (
+            self.auto_expire
+            and self._enabled
+            and self._expires_at is not None
+            and self.clock() >= self._expires_at
+        ):
             self._enabled = False
             self._expires_at = None
             self._reason = "timeout"

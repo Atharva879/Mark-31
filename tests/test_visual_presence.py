@@ -30,15 +30,27 @@ class FakeSource:
 
 def test_camera_requires_explicit_enablement_and_expires():
     clock = Clock()
-    camera = CameraCapture(timeout_seconds=10, capture_factory=lambda: b"PNG", clock=clock)
+    camera = CameraCapture(
+        timeout_seconds=10, capture_factory=lambda: b"PNG", clock=clock, auto_expire=True
+    )
     with pytest.raises(PermissionError, match="disabled"):
         camera.capture_png_base64()
     camera.enable("user_toggle")
     assert base64.b64decode(camera.capture_png_base64()) == b"PNG"
     clock.value = 111
     assert camera.status().active is False
-    with pytest.raises(PermissionError, match="timed out"):
+    with pytest.raises(PermissionError, match="disabled"):
         camera.capture_png_base64()
+
+
+def test_camera_stays_enabled_until_manual_disable():
+    clock = Clock()
+    camera = CameraCapture(timeout_seconds=10, capture_factory=lambda: b"PNG", clock=clock)
+    camera.enable("explicit_user_choice")
+    clock.value = 10_000
+    assert camera.status().active is True
+    camera.disable("manual_stop")
+    assert camera.status().active is False
 
 
 def test_camera_rejects_bad_backend_and_oversized_frame():
