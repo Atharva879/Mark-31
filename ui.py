@@ -22,6 +22,7 @@ from conversation import ConversationStore
 from llm.schemas import ChatMessage
 from main import build_runtime
 from notifications import NativeToastBackend, NotificationCenter
+from permissions import PermissionStore
 from tray import TrayController
 from skills.camera import CameraCapture
 from skills.screen import ScreenCapture
@@ -69,7 +70,9 @@ class JarvisApp(tk.Tk):
         self.memory_window: tk.Toplevel | None = None
         self.context_window: tk.Toplevel | None = None
         self.notification_window: tk.Toplevel | None = None
+        self.permission_window: tk.Toplevel | None = None
         self.memory_records: list[dict[str, object]] = []
+        self.permission_records = []
 
         self.settings = Settings.from_env()
         self.conversation = ConversationStore(
@@ -89,6 +92,9 @@ class JarvisApp(tk.Tk):
             Path(os.environ.get("JARVIS_NOTIFICATIONS_DB", "memory/notifications.db")),
             backend=native_backend,
             max_history=int(os.environ.get("JARVIS_NOTIFICATION_MAX_HISTORY", "500")),
+        )
+        self.permissions = PermissionStore(
+            Path(os.environ.get("JARVIS_PERMISSIONS_DB", "memory/permissions.db"))
         )
         self.tray = TrayController(
             lambda: self.events.put(("show_window", "")),
@@ -318,6 +324,12 @@ class JarvisApp(tk.Tk):
         ).pack(side="left", padx=(0, 8))
         ttk.Button(
             actions, text="ALERTS", style="Jarvis.TButton", command=self._open_notification_history
+        ).pack(side="left", padx=(0, 8))
+        ttk.Button(
+            actions,
+            text="PERMISSIONS",
+            style="Jarvis.TButton",
+            command=self._open_permissions_manager,
         ).pack(side="left", padx=(0, 8))
         ttk.Button(
             actions, text="API CONFIG", style="Jarvis.TButton", command=self._open_api_config
@@ -740,7 +752,7 @@ class JarvisApp(tk.Tk):
         return f"{payload.path}{suffix}\n\n{response}"
 
     def _analyze_screen(self, prompt: str) -> str:
-        if not self.screen.status().active:
+        if not self.permissions.check("screen") or not self.screen.status().active:
             raise PermissionError("Enable Screen Awareness before using /screen analysis")
         provider = self.router.providers.get("gemini")
         if provider is None or not hasattr(provider, "analyze_image"):
@@ -752,7 +764,10 @@ class JarvisApp(tk.Tk):
 
     def _analyze_camera(self, prompt: str) -> str:
         was_active = self.camera.status().active
+        if not self.permissions.check("camera") and was_active:
+            raise PermissionError("Camera permission is disabled")
         if not was_active:
+            self.permissions.grant("camera", duration_seconds=300, reason="explicit_camera_command")
             self.camera.enable("chat_command")
             self.events.put(("visual_status", None))
         try:
@@ -766,6 +781,7 @@ class JarvisApp(tk.Tk):
         finally:
             if not was_active:
                 self.camera.disable("command_complete")
+                self.permissions.revoke("camera", "command_complete")
                 self.events.put(("visual_status", None))
 
     def _visual_tick(self) -> None:
@@ -783,6 +799,8 @@ class JarvisApp(tk.Tk):
                 return
             for source in ("screen", "camera"):
                 try:
+                    if not self.permissions.check(source):
+                        continue
                     thought = self.visual_observer.sample(source)
                     if thought is None:
                         continue
@@ -841,6 +859,7 @@ class JarvisApp(tk.Tk):
     def _toggle_camera(self) -> None:
         if self.camera.status().active:
             self.camera.disable("user_toggle")
+            self.permissions.revoke("camera", "camera_toggle")
             self.visual_observer.reset("camera")
             self.camera_button.configure(text="ENABLE CAMERA")
             self.camera_indicator.configure(text="○  CAMERA OFF", fg=COLORS["muted"])
@@ -848,6 +867,7 @@ class JarvisApp(tk.Tk):
                 "SYSTEM", "Camera awareness disabled. No camera frame is active.", COLORS["muted"]
             )
         else:
+            self.permissions.grant("camera", duration_seconds=24 * 60 * 60, reason="camera_toggle")
             self.camera.enable("user_toggle")
             self.camera_button.configure(text="DISABLE CAMERA")
             self.camera_indicator.configure(text="●  CAMERA ACTIVE", fg=COLORS["red"])
@@ -859,7 +879,11 @@ class JarvisApp(tk.Tk):
 
     def _toggle_visual_thoughts(self) -> None:
         self.visual_thoughts_enabled = not self.visual_thoughts_enabled
-        if not self.visual_thoughts_enabled:
+        if self.visual_thoughts_enabled:
+            self.permissions.grant(
+                "visual_thoughts", duration_seconds=24 * 60 * 60, reason="visual_toggle"
+            )
+        else:
             self.visual_observer.reset()
         self.visual_thoughts_button.configure(
             text="VISUAL THOUGHTS ON" if self.visual_thoughts_enabled else "VISUAL THOUGHTS OFF"
@@ -876,9 +900,13 @@ class JarvisApp(tk.Tk):
         status = self.windows_context.status()
         if status.active_window_enabled:
             self.windows_context.disable_active_window()
+            self.permissions.revoke("active_window", "context_toggle")
             self.window_context_button.configure(text="WINDOW CONTEXT OFF")
             self._write_log("SYSTEM", "Active-window context disabled.", COLORS["muted"])
         else:
+            self.permissions.grant(
+                "active_window", duration_seconds=7 * 24 * 60 * 60, reason="context_toggle"
+            )
             self.windows_context.enable_active_window()
             self.window_context_button.configure(text="WINDOW CONTEXT ON")
             self._write_log(
@@ -890,9 +918,11 @@ class JarvisApp(tk.Tk):
         status = self.windows_context.status()
         if status.clipboard_enabled:
             self.windows_context.disable_clipboard()
+            self.permissions.revoke("clipboard", "context_toggle")
             self.clipboard_context_button.configure(text="CLIPBOARD OFF")
             self._write_log("SYSTEM", "Clipboard context disabled.", COLORS["muted"])
         else:
+            self.permissions.grant("clipboard", duration_seconds=60 * 60, reason="context_toggle")
             self.windows_context.enable_clipboard()
             self.clipboard_context_button.configure(text="CLIPBOARD ON")
             self._write_log(
@@ -965,6 +995,7 @@ class JarvisApp(tk.Tk):
     def _toggle_screen(self) -> None:
         if self.screen.status().active:
             self.screen.disable("user_toggle")
+            self.permissions.revoke("screen", "screen_toggle")
             self.visual_observer.reset("screen")
             self.screen_button.configure(text="ENABLE SCREEN")
             self.screen_indicator.configure(text="○  SCREEN OFF", fg=COLORS["muted"])
@@ -972,6 +1003,7 @@ class JarvisApp(tk.Tk):
                 "SYSTEM", "Screen awareness disabled. No screenshot is active.", COLORS["muted"]
             )
         else:
+            self.permissions.grant("screen", duration_seconds=24 * 60 * 60, reason="screen_toggle")
             self.screen.enable("user_toggle")
             self.screen_button.configure(text="DISABLE SCREEN")
             self.screen_indicator.configure(text="●  SCREEN ACTIVE", fg=COLORS["red"])
@@ -1161,6 +1193,7 @@ class JarvisApp(tk.Tk):
         self.presence.mark_activity()
         if self.voice_request_active:
             return
+        self.permissions.grant("microphone", duration_seconds=60 * 60, reason="push_to_talk")
         self.voice_request_active = True
         self.voice_button.configure(state="disabled", text="LISTENING...")
         self._set_state("LISTENING", "MICROPHONE ACTIVE")
@@ -1181,6 +1214,8 @@ class JarvisApp(tk.Tk):
             self._run_command(text)
         except Exception as exc:
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
+        finally:
+            self.permissions.revoke("microphone", "push_to_talk_complete")
 
     def _interrupt(self) -> None:
         self.tts.stop()
@@ -1521,6 +1556,138 @@ class JarvisApp(tk.Tk):
         if result.error:
             messagebox.showerror("Delete monitor", result.error, parent=self.monitor_window)
         self._monitor_refresh()
+
+    def _open_permissions_manager(self) -> None:
+        if self.permission_window is not None and self.permission_window.winfo_exists():
+            self.permission_window.deiconify()
+            self.permission_window.lift()
+            return
+        window = tk.Toplevel(self)
+        self.permission_window = window
+        window.title("JARVIS // PERMISSIONS")
+        window.configure(bg=COLORS["bg"])
+        window.geometry("820x560")
+        window.minsize(680, 420)
+        window.transient(self)
+        window.protocol("WM_DELETE_WINDOW", self._close_permissions_manager)
+        tk.Label(
+            window,
+            text="PERMISSION CENTER",
+            bg=COLORS["bg"],
+            fg=COLORS["cyan"],
+            font=("Segoe UI", 19, "bold"),
+        ).pack(anchor="w", padx=24, pady=(22, 3))
+        tk.Label(
+            window,
+            text="Every device and context source is independently revocable. Expired grants fail closed.",
+            bg=COLORS["bg"],
+            fg=COLORS["muted"],
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", padx=24, pady=(0, 16))
+        frame = tk.Frame(
+            window, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1
+        )
+        frame.pack(fill="both", expand=True, padx=24, pady=(0, 14))
+        self.permission_list = tk.Listbox(
+            frame,
+            bg="#07111d",
+            fg=COLORS["text"],
+            selectbackground="#16405a",
+            relief="flat",
+            font=("Cascadia Mono", 9),
+            activestyle="none",
+        )
+        self.permission_list.pack(fill="both", expand=True, padx=12, pady=12)
+        footer = tk.Frame(window, bg=COLORS["bg"])
+        footer.pack(fill="x", padx=24, pady=(0, 20))
+        self.permission_status_label = tk.Label(
+            footer, text="", bg=COLORS["bg"], fg=COLORS["muted"], font=("Cascadia Mono", 8)
+        )
+        self.permission_status_label.pack(side="left")
+        ttk.Button(
+            footer,
+            text="REVOKE SELECTED",
+            style="Jarvis.TButton",
+            command=self._revoke_selected_permission,
+        ).pack(side="right", padx=(8, 0))
+        ttk.Button(
+            footer, text="REVOKE ALL", style="Jarvis.TButton", command=self._revoke_all_permissions
+        ).pack(side="right", padx=(8, 0))
+        ttk.Button(
+            footer, text="REFRESH", style="Jarvis.TButton", command=self._refresh_permissions
+        ).pack(side="right", padx=(8, 0))
+        ttk.Button(
+            footer, text="CLOSE", style="Jarvis.TButton", command=self._close_permissions_manager
+        ).pack(side="right")
+        self._refresh_permissions()
+
+    def _close_permissions_manager(self) -> None:
+        if self.permission_window is not None and self.permission_window.winfo_exists():
+            self.permission_window.destroy()
+        self.permission_window = None
+
+    def _refresh_permissions(self) -> None:
+        if self.permission_window is None or not self.permission_window.winfo_exists():
+            return
+        self.permission_list.delete(0, "end")
+        self.permission_records = self.permissions.list()
+        for grant in self.permission_records:
+            expiry = (
+                time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(grant.expires_at))
+                if grant.expires_at
+                else "none"
+            )
+            state = "ENABLED" if grant.enabled else "DISABLED"
+            self.permission_list.insert(
+                "end", f"{grant.name:<22} {state:<9} expires={expiry}  reason={grant.reason}"
+            )
+        self.permission_status_label.configure(
+            text=f"{len(self.permission_records)} explicit grants recorded locally."
+        )
+
+    def _revoke_selected_permission(self) -> None:
+        selection = self.permission_list.curselection() if hasattr(self, "permission_list") else ()
+        if not selection or selection[0] >= len(self.permission_records):
+            return
+        name = self.permission_records[selection[0]].name
+        self._revoke_permission_runtime(name)
+        self._refresh_permissions()
+
+    def _revoke_all_permissions(self) -> None:
+        if not messagebox.askyesno(
+            "Revoke permissions",
+            "Revoke every active Jarvis capability grant?",
+            parent=self.permission_window,
+        ):
+            return
+        for name in (
+            "screen",
+            "camera",
+            "active_window",
+            "clipboard",
+            "microphone",
+            "visual_thoughts",
+        ):
+            self._revoke_permission_runtime(name)
+        self._refresh_permissions()
+
+    def _revoke_permission_runtime(self, name: str) -> None:
+        self.permissions.revoke(name, "permission_center")
+        if name == "screen":
+            self.screen.disable("permission_revoked")
+            self.visual_observer.reset("screen")
+        elif name == "camera":
+            self.camera.disable("permission_revoked")
+            self.visual_observer.reset("camera")
+        elif name == "active_window":
+            self.windows_context.disable_active_window()
+        elif name == "clipboard":
+            self.windows_context.disable_clipboard()
+        elif name == "visual_thoughts":
+            self.visual_thoughts_enabled = False
+            self.visual_observer.reset()
+        self._write_log("SYSTEM", f"Permission revoked: {name}", COLORS["orange"])
+        self.events.put(("visual_status", None))
 
     def _open_notification_history(self) -> None:
         if self.notification_window is not None and self.notification_window.winfo_exists():
@@ -2198,6 +2365,7 @@ class JarvisApp(tk.Tk):
         self.tts.stop()
         self.tray.stop()
         self.scheduler.stop()
+        self._close_permissions_manager()
         self.destroy()
 
 
