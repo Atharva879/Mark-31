@@ -25,6 +25,8 @@ windows = [
   "psutil>=5.9,<8",
   "send2trash>=1.8,<2",
   "opencv-python>=4.8,<5",
+  "pystray>=0.19,<1",
+  "winotify>=1,<2",
 ]
 multimodal = [
   "Pillow>=10,<13",
