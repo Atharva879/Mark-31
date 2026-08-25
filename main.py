@@ -21,6 +21,7 @@ from plugins import PluginCatalog
 from llm.schemas import RiskTier, ToolSpec
 from memory.long_term import LongTermMemory
 from skills.apps import AppConfig, ApplicationController
+from skills.window_manager import WindowManager
 from skills.browser import ReadOnlyBrowser
 from skills.code_sandbox import CodeSandbox
 from skills.files import ScopedFileManager
@@ -80,6 +81,7 @@ def build_runtime(
         settings.allowed_roots,
     )
     system_controller = SystemController(allowed_roots=settings.allowed_roots)
+    window_manager = WindowManager()
     plugin_catalog = PluginCatalog(Path(os.environ.get("JARVIS_PLUGIN_DIR", "memory/plugins")))
 
     monitor_web = _build_web_client()
@@ -165,8 +167,10 @@ def build_runtime(
     registry.knowledge_store = knowledge_store
     registry.plugin_catalog = plugin_catalog
     registry.system_controller = system_controller
+    registry.window_manager = window_manager
     _register_knowledge_tools(registry, knowledge_store)
     _register_system_tools(registry, system_controller)
+    _register_window_tools(registry, window_manager)
     return router, dispatcher, registry
 
 
@@ -286,6 +290,56 @@ def _register_personal_tools(
             },
             risk=RiskTier.SAFE,
             handler=store.list_email_drafts,
+        )
+    )
+
+
+def _register_window_tools(registry: ToolRegistry, manager: WindowManager) -> None:
+    for name, description, handler in (
+        (
+            "list_open_windows",
+            "List visible open Windows application windows and stable handles.",
+            manager.list_windows,
+        ),
+        ("focus_window", "Focus and restore an identified open window.", manager.focus),
+        ("minimize_window", "Minimize an identified open window.", manager.minimize),
+        ("maximize_window", "Maximize an identified open window.", manager.maximize),
+        ("restore_window", "Restore an identified open window.", manager.restore),
+        ("close_window", "Close an identified open window after confirmation.", manager.close),
+    ):
+        registry.register(
+            ToolSpec(
+                name=name,
+                description=description,
+                parameters={
+                    "type": "object",
+                    "properties": {"handle": {"type": "integer", "minimum": 1}},
+                    "required": ["handle"],
+                    "additionalProperties": False,
+                },
+                risk=RiskTier.SENSITIVE if name == "close_window" else RiskTier.MODERATE,
+                confirmation_required=name == "close_window",
+                handler=handler,
+            )
+        )
+    registry.register(
+        ToolSpec(
+            name="move_resize_window",
+            description="Move and resize an identified window inside bounded screen coordinates.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "handle": {"type": "integer", "minimum": 1},
+                    "x": {"type": "integer", "minimum": 0, "maximum": 10000},
+                    "y": {"type": "integer", "minimum": 0, "maximum": 10000},
+                    "width": {"type": "integer", "minimum": 200, "maximum": 10000},
+                    "height": {"type": "integer", "minimum": 150, "maximum": 10000},
+                },
+                "required": ["handle", "x", "y", "width", "height"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.MODERATE,
+            handler=manager.move_resize,
         )
     )
 
