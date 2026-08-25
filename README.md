@@ -40,6 +40,7 @@ The repository currently contains the first vertical slice:
 | Windows context awareness | Implemented with opt-in active-window and clipboard context, redaction, length limits, and fail-closed non-Windows behavior |
 | Native notifications and tray | Implemented with persistent local ALERTS history and opt-in Windows toast/tray backends |
 | Permission center | Implemented with persistent per-capability grants, expirations, independent revocation, and revoke-all controls |
+| Personal assistant tools | Implemented with local tasks, bounded ICS calendar reading, and draft-only local email storage |
 | SimilarWeb analytics adapter | Planned for Milestone 10; credential/API boundary must be confirmed |
 
 ## Desktop interface
@@ -97,6 +98,8 @@ Windows context awareness is also opt-in. `WINDOW CONTEXT ON` can provide the fo
 The `ALERTS` panel stores bounded local notification history, supports marking alerts as read, and remains available even if a native toast backend is unavailable. Set `JARVIS_NATIVE_NOTIFICATIONS=true` to enable Windows toasts and `JARVIS_TRAY_ENABLED=true` to enable the optional tray icon. Both are disabled by default; tray callbacks return to the Tkinter event queue before changing the main window or shutting down.
 
 The `PERMISSIONS` panel shows explicit capability grants and expiry times, supports independent revocation, and provides a revoke-all control. Screen, camera, microphone, active-window, clipboard, and visual-thought access remain disabled until their corresponding UI action grants a bounded permission. Revoking a permission also disables the live runtime source when applicable.
+
+The personal-assistant layer is local-first. `create_task`, `list_tasks`, and `complete_task` use the bounded local task database. `list_calendar_events` reads only the explicitly configured `JARVIS_CALENDAR_ICS` file when it is under `JARVIS_ALLOWED_ROOTS`, and `create_email_draft` stores a draft locally without sending email or contacting an account. External calendar, task, and email providers are intentionally not connected until a provider-specific permission and account flow is added.
 
 The `API CONFIG` panel now switches the active provider configuration without editing files manually. It includes Gemini and OpenRouter API key fields, Gemini/OpenRouter/local model names, a localhost-only OpenAI-compatible local endpoint, and a fallback order accepting `local`, `gemini`, and `openrouter`. `SAVE + APPLY` validates all fields, persists them to the local `.env`, refreshes the router, and keeps keys masked by default. A local provider can point to Ollama or another compatible server at `127.0.0.1`, `localhost`, or `::1`; remote endpoints are rejected by design.
 
