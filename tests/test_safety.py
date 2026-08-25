@@ -11,20 +11,13 @@ from safety import build_confirmation_request, requires_confirmation
 
 
 def test_invalid_provider_order_is_rejected():
-    with pytest.raises(ValueError, match="local, gemini, and openrouter"):
+    with pytest.raises(ValueError, match="gemini and openrouter"):
         Settings.from_env({"JARVIS_PROVIDER_ORDER": "gemini,unknown"})
 
 
-def test_local_provider_settings_are_validated():
-    result = Settings.from_env({
-        "JARVIS_PROVIDER_ORDER": "local,gemini,openrouter",
-        "JARVIS_LOCAL_MODEL": "qwen2.5:7b",
-        "JARVIS_LOCAL_BASE_URL": "http://localhost:11434/v1/chat/completions",
-    })
-    assert result.provider_order == ("local", "gemini", "openrouter")
-    assert result.local_model == "qwen2.5:7b"
-    with pytest.raises(ValueError, match="localhost"):
-        Settings.from_env({"JARVIS_LOCAL_BASE_URL": "https://example.com/v1/chat/completions"})
+def test_local_provider_is_rejected():
+    with pytest.raises(ValueError, match="gemini and openrouter"):
+        Settings.from_env({"JARVIS_PROVIDER_ORDER": "local,gemini,openrouter"})
 
 
 def test_settings_parse_paths_and_limits():
