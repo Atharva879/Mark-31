@@ -153,6 +153,7 @@ class JarvisApp(tk.Tk):
         )
         self.tts = SpeechSynthesizer(rate=int(os.environ.get("JARVIS_TTS_RATE", "175")))
         self.voice_request_active = False
+        self.voice_mode = "push_to_talk"
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.presence = PresenceEngine(
             PresenceStore(self.settings.presence_db_path),
@@ -586,6 +587,13 @@ class JarvisApp(tk.Tk):
             controls, text="START VOICE", style="Jarvis.TButton", command=self._start_voice
         )
         self.voice_button.pack(side="left", padx=5)
+        self.voice_mode_button = ttk.Button(
+            controls,
+            text="VOICE: PUSH-TO-TALK",
+            style="Jarvis.TButton",
+            command=self._toggle_voice_mode,
+        )
+        self.voice_mode_button.pack(side="left", padx=5)
         ttk.Button(
             controls, text="INTERRUPT", style="Jarvis.TButton", command=self._interrupt
         ).pack(side="left", padx=5)
@@ -1312,20 +1320,51 @@ class JarvisApp(tk.Tk):
             self.chat_window.destroy()
         self.chat_window = None
 
+    def _toggle_voice_mode(self) -> None:
+        if self.voice_request_active:
+            return
+        self.voice_mode = "normal_talk" if self.voice_mode == "push_to_talk" else "push_to_talk"
+        self.voice_mode_button.configure(
+            text="VOICE: NORMAL TALK" if self.voice_mode == "normal_talk" else "VOICE: PUSH-TO-TALK"
+        )
+        self._write_log(
+            "SYSTEM",
+            f"Voice mode set to {self.voice_mode.replace('_', ' ').title()}.",
+            COLORS["cyan"],
+        )
+
     def _start_voice(self) -> None:
         self.presence.mark_activity()
         if self.voice_request_active:
             return
-        self.permissions.grant("microphone", duration_seconds=60 * 60, reason="push_to_talk")
+        self.permissions.grant("microphone", duration_seconds=60 * 60, reason=self.voice_mode)
         self.voice_request_active = True
         self.voice_button.configure(state="disabled", text="LISTENING...")
         self._set_state("LISTENING", "MICROPHONE ACTIVE")
-        self._write_log(
-            "SYSTEM",
-            "Push-to-talk capture started. Audio stays local for transcription.",
-            COLORS["orange"],
+        message = (
+            "Normal Talk listening started. Press INTERRUPT to stop; audio stays local for transcription."
+            if self.voice_mode == "normal_talk"
+            else "Push-to-talk capture started. Audio stays local for transcription."
         )
-        threading.Thread(target=self._listen_and_run, daemon=True).start()
+        self._write_log("SYSTEM", message, COLORS["orange"])
+        worker = (
+            self._listen_normal_loop if self.voice_mode == "normal_talk" else self._listen_and_run
+        )
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _listen_normal_loop(self) -> None:
+        try:
+            while self.voice_request_active:
+                text = self.voice_input.listen_once()
+                if text:
+                    self.events.put(("voice_transcript", text))
+                    self.events.put(("voice_thinking", ""))
+                    self._run_command(text)
+        except Exception as exc:
+            self.events.put(("error", f"{type(exc).__name__}: {exc}"))
+        finally:
+            self.permissions.revoke("microphone", "normal_talk_stopped")
+            self.voice_request_active = False
 
     def _listen_and_run(self) -> None:
         try:
