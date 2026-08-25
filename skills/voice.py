@@ -42,6 +42,8 @@ class VoiceInput:
 
     def listen_once(self) -> str:
         """Record one bounded utterance and return normalized text."""
+        if self.audio_transcriber is None and not self.gemini_api_key and self.transcriber is None:
+            raise RuntimeError("Configure a Gemini API key before using voice input")
         if self.recorder is not None:
             audio_bytes = self.recorder(self.max_seconds, self.sample_rate)
             if not isinstance(audio_bytes, bytes) or not audio_bytes:
@@ -205,7 +207,9 @@ class SpeechSynthesizer:
             import sounddevice as sd
         except ImportError as exc:
             raise RuntimeError("Install sounddevice to play Gemini audio") from exc
-        pcm = base64.b64decode(audio)
+        import numpy as np
+
+        pcm = np.frombuffer(base64.b64decode(audio), dtype=np.int16)
         sd.play(pcm, samplerate=24_000, blocking=True)
 
     def stop(self) -> None:

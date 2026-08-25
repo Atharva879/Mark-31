@@ -1420,9 +1420,9 @@ class JarvisApp(tk.Tk):
         self.voice_button.configure(state="disabled", text="LISTENING...")
         self._set_state("LISTENING", "MICROPHONE ACTIVE")
         message = (
-            "Normal Talk listening started. Press INTERRUPT to stop; audio stays local for transcription."
+            "Normal Talk listening started. Press INTERRUPT to stop; audio is processed in memory through Gemini when configured."
             if self.voice_mode == "normal_talk"
-            else "Push-to-talk capture started. Audio stays local for transcription."
+            else "Push-to-talk capture started. Audio is processed in memory through Gemini when configured."
         )
         self._write_log("SYSTEM", message, COLORS["orange"])
         worker = (
@@ -2760,6 +2760,15 @@ class JarvisApp(tk.Tk):
                     "JARVIS_LOCAL_MODEL": local_model.strip(),
                     "JARVIS_LOCAL_BASE_URL": local_url.strip(),
                 }
+            )
+            self.settings = new_settings
+            self.voice_input.gemini_api_key = gemini_key.strip()
+            self.voice_input.gemini_model = os.environ.get(
+                "JARVIS_VOICE_INPUT_MODEL", "gemini-3.7-flash"
+            )
+            self.tts.gemini_api_key = gemini_key.strip()
+            self.tts.gemini_model = os.environ.get(
+                "JARVIS_TTS_MODEL", "gemini-3.1-flash-tts-preview"
             )
             self.settings = new_settings
             self.scheduler.stop()
