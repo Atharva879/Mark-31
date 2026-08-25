@@ -20,6 +20,7 @@ from config import Settings
 from main import build_runtime
 from skills.screen import ScreenCapture
 from skills.voice import SpeechSynthesizer, VoiceInput
+from skills.web import WebClient
 from ui_config import write_local_env
 
 try:
@@ -58,6 +59,12 @@ class JarvisApp(tk.Tk):
         self.settings = Settings.from_env()
         self.router, self.dispatcher, self.registry = build_runtime(self.settings)
         self.screen = ScreenCapture(timeout_seconds=float(os.environ.get("JARVIS_SCREEN_TIMEOUT_SECONDS", "60")))
+        self.web = WebClient(
+            timeout_seconds=float(os.environ.get("JARVIS_WEB_TIMEOUT_SECONDS", "15")),
+            max_response_bytes=int(os.environ.get("JARVIS_WEB_MAX_RESPONSE_BYTES", "1000000")),
+            max_results=int(os.environ.get("JARVIS_WEB_MAX_RESULTS", "5")),
+            allowed_hosts={item.strip().lower() for item in os.environ.get("JARVIS_WEB_ALLOWED_HOSTS", "").split(",") if item.strip()},
+        )
         self.voice_input = VoiceInput(
             model_size=os.environ.get("JARVIS_WHISPER_MODEL", "base"),
             max_seconds=float(os.environ.get("JARVIS_VOICE_MAX_SECONDS", "10")),
@@ -131,6 +138,7 @@ class JarvisApp(tk.Tk):
         self.connection_label.pack(anchor="e")
         self.screen_indicator = tk.Label(status_cluster, text="○  SCREEN OFF", bg=COLORS["bg"], fg=COLORS["muted"], font=("Cascadia Mono", 8))
         self.screen_indicator.pack(anchor="e", pady=(3, 0))
+        tk.Label(status_cluster, text="●  WEB READY", bg=COLORS["bg"], fg=COLORS["green"], font=("Cascadia Mono", 8)).pack(anchor="e", pady=(3, 0))
         ttk.Button(header, text="API CONFIG", style="Jarvis.TButton", command=self._open_api_config).grid(
             row=0, column=2, rowspan=2, sticky="e"
         )
@@ -283,13 +291,28 @@ class JarvisApp(tk.Tk):
 
     def _run_command(self, command: str) -> None:
         try:
-            if command.lower().startswith("/screen "):
+            lowered = command.lower()
+            if lowered.startswith("/screen "):
                 response = self._analyze_screen(command[8:].strip())
+            elif lowered.startswith("/search "):
+                response = self._search_web(command[8:].strip())
+            elif lowered.startswith("/fetch "):
+                response = self._fetch_web(command[7:].strip())
             else:
                 response = self.router.run_tool_loop(command, self.registry.all(), self.dispatcher)
             self.events.put(("response", response or "Action completed."))
         except Exception as exc:
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
+
+    def _search_web(self, query: str) -> str:
+        results = self.web.search(query)
+        if not results:
+            return "No public web results found."
+        return "\n\n".join(f"{index}. {item['title']}\n{item['url']}\n{item['snippet']}" for index, item in enumerate(results, 1))
+
+    def _fetch_web(self, url: str) -> str:
+        payload = self.web.fetch_url(url)
+        return f"{payload['url']}\n[{payload['content_type']}] retrieved {payload['retrieved_at']}\n\n{payload['content']}"
 
     def _analyze_screen(self, prompt: str) -> str:
         if not self.screen.status().active:
