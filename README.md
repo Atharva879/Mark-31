@@ -172,3 +172,8 @@ Each milestone should be implemented separately, tested with mocks before real a
 Mark-31 includes a `SecretStore` abstraction that uses Windows DPAPI when the Windows backend is available. It deliberately fails closed on unsupported platforms or missing DPAPI support instead of falling back to plaintext storage. Existing `.env` files are not migrated automatically; a user must explicitly choose a future migration flow.
 
 `BackupManager` creates integrity-checked ZIP archives for explicitly selected local files, writes a versioned manifest with SHA-256 checksums, excludes `.env` files, and rejects unsafe archive paths during validation and restore. Backups are local-only and do not upload data or credentials. Restore remains an explicit, user-confirmed operation.
+
+
+## Windows dependency installer
+
+On Windows, double-click `install_dependencies.bat` to install Python 3.11+ dependencies, all Mark-31 optional features, Playwright Chromium, and development checks. The installer is safe to rerun and does not change PowerShell execution policy. After it completes, build the standalone executable with `build_windows.ps1` from PowerShell.
