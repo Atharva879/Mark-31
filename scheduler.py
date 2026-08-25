@@ -172,11 +172,13 @@ class BackgroundScheduler:
         notify: Callable[[str], None] | None = None,
         poll_seconds: float = 1.0,
         max_run_history: int = 500,
+        loop_runner: Callable[[Trigger], tuple[str, bool, dict[str, Any]]] | None = None,
     ) -> None:
         del poll_seconds  # APScheduler owns timing; retained for config compatibility.
         self.store = store
         self.monitor = monitor
         self.notify = notify or (lambda _message: None)
+        self.loop_runner = loop_runner
         self.max_run_history = max(50, min(int(max_run_history), 10_000))
         self._scheduler: APSBackgroundScheduler | None = None
         self._active: set[str] = set()
@@ -214,10 +216,23 @@ class BackgroundScheduler:
     ) -> dict[str, Any]:
         name = _bounded(name, "name", 120)
         kind = _bounded(kind, "kind", 40).lower()
-        if kind not in {"web_url", "file", "reminder"}:
-            raise SchedulerValidationError("kind must be web_url, file, or reminder")
+        if kind not in {"web_url", "file", "reminder", "loop"}:
+            raise SchedulerValidationError("kind must be web_url, file, reminder, or loop")
         payload = dict(payload)
-        required_key = "url" if kind == "web_url" else "path" if kind == "file" else "message"
+        if kind == "loop":
+            if self.loop_runner is None:
+                raise SchedulerValidationError("loop triggers require a configured loop runner")
+            if not isinstance(payload.get("loop_id"), str) or not isinstance(
+                payload.get("tool"), str
+            ):
+                raise SchedulerValidationError("loop payload requires loop_id and tool")
+        if kind == "loop":
+            required_key = "tool"
+            target = payload.get(required_key)
+            if not isinstance(target, str) or not target.strip():
+                raise SchedulerValidationError("loop payload must include a non-empty tool")
+        else:
+            required_key = "url" if kind == "web_url" else "path" if kind == "file" else "message"
         target = payload.get(required_key)
         if not isinstance(target, str) or not target.strip() or len(target.strip()) > 2_000:
             raise SchedulerValidationError(f"payload must include a non-empty {required_key}")
@@ -327,7 +342,12 @@ class BackgroundScheduler:
         run_id = uuid.uuid4().hex
         started = _now()
         try:
-            summary, changed, state = self.monitor(trigger)
+            if trigger.kind == "loop":
+                if self.loop_runner is None:
+                    raise SchedulerValidationError("loop runner is unavailable")
+                summary, changed, state = self.loop_runner(trigger)
+            else:
+                summary, changed, state = self.monitor(trigger)
             payload = dict(trigger.payload)
             payload["last_state"] = state
             payload["last_changed"] = bool(changed)

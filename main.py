@@ -37,6 +37,7 @@ from backup import BackupManager
 from scheduler import BackgroundScheduler, SchedulerStore
 from secrets import SecretStore
 from workflows import SafeWorkflowEngine, WorkflowStep, WorkflowStore
+from task_loops import AutonomousLoopController, TaskLoopStore
 from startup import StartupManager
 from system_controls import SystemController
 
@@ -109,6 +110,10 @@ def build_runtime(
     }
     router = LLMRouter(providers, settings)
     dispatcher = Dispatcher(registry, audit, confirm=confirm, notify=notify)
+    loop_controller = AutonomousLoopController(
+        TaskLoopStore(Path(os.environ.get("JARVIS_LOOP_DB", "memory/task_loops.db"))), dispatcher
+    )
+    scheduler.loop_runner = lambda trigger: _run_loop_trigger(trigger, loop_controller, registry)
     coordinator = MultiAgentCoordinator(
         router,
         audit,
@@ -168,6 +173,7 @@ def build_runtime(
     registry.plugin_catalog = plugin_catalog
     registry.system_controller = system_controller
     registry.window_manager = window_manager
+    registry.loop_controller = loop_controller
     _register_knowledge_tools(registry, knowledge_store)
     _register_system_tools(registry, system_controller)
     _register_window_tools(registry, window_manager)
@@ -292,6 +298,21 @@ def _register_personal_tools(
             handler=store.list_email_drafts,
         )
     )
+
+
+def _run_loop_trigger(trigger, controller, registry):
+    payload = trigger.payload
+    tool = str(payload.get("tool", ""))
+    spec = registry.get(tool)
+    result = controller.run(
+        str(payload.get("loop_id", trigger.trigger_id)),
+        tool,
+        dict(payload.get("arguments", {})),
+        spec.risk.value,
+        int(payload.get("iterations", 1)),
+    )
+    completed = int(result.get("completed", 0))
+    return f"Autonomous loop completed {completed} iteration(s)", completed > 0, result
 
 
 def _register_window_tools(registry: ToolRegistry, manager: WindowManager) -> None:
