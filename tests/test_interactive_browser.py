@@ -59,6 +59,14 @@ def test_interactive_browser_actions_are_bounded():
     assert any(call[0] == "click" for call in browser.page.calls)
 
 
+def test_credential_handoff_and_submit_are_available():
+    browser = FakeBrowser()
+    adapter = InteractiveBrowser(browser=browser, execute_check=lambda: True)
+    assert adapter.credential_handoff()["secrets_exposed"] is False
+    result = adapter.submit("button.submit")
+    assert result["status"] == "submitted_after_confirmation"
+
+
 def test_interactive_browser_rejects_missing_permission_and_unsafe_inputs():
     adapter = InteractiveBrowser(browser=FakeBrowser(), execute_check=lambda: False)
     with pytest.raises(PermissionError):

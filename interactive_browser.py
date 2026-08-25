@@ -89,6 +89,24 @@ class InteractiveBrowser:
             "size_bytes": target.stat().st_size,
         }
 
+    def credential_handoff(self) -> dict[str, object]:
+        self._ready()
+        return {
+            "status": "user_handoff_required",
+            "message": "Enter credentials and complete MFA or CAPTCHA manually, then resume.",
+            "secrets_exposed": False,
+        }
+
+    def submit(self, selector: str) -> dict[str, object]:
+        page = self._ready()
+        selector = self._selector(selector)
+        page.locator(selector).click(timeout=10_000)
+        return {
+            "action": "submit",
+            "selector": selector,
+            "status": "submitted_after_confirmation",
+        }
+
     def press(self, selector: str, key: str) -> dict[str, object]:
         page = self._ready()
         selector = self._selector(selector)
