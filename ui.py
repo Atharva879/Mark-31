@@ -8,6 +8,7 @@ execution, diagnostics, and confirmation surface for the existing safe core.
 from __future__ import annotations
 
 import base64
+import json
 import os
 import queue
 import threading
@@ -1592,6 +1593,47 @@ class JarvisApp(tk.Tk):
             fg=COLORS["muted"],
             font=("Segoe UI", 9),
         ).pack(anchor="w", padx=24, pady=(0, 16))
+        create_panel = tk.Frame(
+            window, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1
+        )
+        create_panel.pack(fill="x", padx=24, pady=(0, 12))
+        self.workflow_name_var = tk.StringVar()
+        self.workflow_tool_var = tk.StringVar()
+        self.workflow_args_var = tk.StringVar(value="{}")
+        safe_tools = tuple(tool.name for tool in self.registry.all() if str(tool.risk) == "SAFE")
+        tk.Entry(
+            create_panel,
+            textvariable=self.workflow_name_var,
+            bg="#0d2030",
+            fg=COLORS["text"],
+            insertbackground=COLORS["cyan"],
+            relief="flat",
+            font=("Segoe UI", 9),
+            width=22,
+        ).pack(side="left", padx=(12, 6), pady=10, ipady=5)
+        ttk.Combobox(
+            create_panel,
+            textvariable=self.workflow_tool_var,
+            values=safe_tools,
+            state="readonly",
+            width=22,
+        ).pack(side="left", padx=6, pady=10)
+        tk.Entry(
+            create_panel,
+            textvariable=self.workflow_args_var,
+            bg="#0d2030",
+            fg=COLORS["text"],
+            insertbackground=COLORS["cyan"],
+            relief="flat",
+            font=("Cascadia Mono", 9),
+            width=28,
+        ).pack(side="left", padx=6, pady=10, ipady=5)
+        ttk.Button(
+            create_panel,
+            text="CREATE SAFE",
+            style="Jarvis.TButton",
+            command=self._create_safe_workflow,
+        ).pack(side="right", padx=12, pady=10)
         frame = tk.Frame(
             window, bg=COLORS["panel"], highlightbackground=COLORS["line"], highlightthickness=1
         )
@@ -1625,6 +1667,26 @@ class JarvisApp(tk.Tk):
             footer, text="CLOSE", style="Jarvis.TButton", command=self._close_workflow_manager
         ).pack(side="right")
         self._refresh_workflows()
+
+    def _create_safe_workflow(self) -> None:
+        name = self.workflow_name_var.get().strip()
+        tool_name = self.workflow_tool_var.get().strip()
+        try:
+            arguments = json.loads(self.workflow_args_var.get().strip() or "{}")
+            if not isinstance(arguments, dict):
+                raise ValueError("Arguments must be a JSON object")
+            if not name or not tool_name:
+                raise ValueError("Routine name and safe tool are required")
+            if not messagebox.askyesno(
+                "Create routine", f"Save SAFE routine '{name}'?", parent=self.workflow_window
+            ):
+                return
+            self.workflow_engine.store.create(name, [WorkflowStep(tool_name, arguments)])
+            self.workflow_name_var.set("")
+            self.workflow_args_var.set("{}")
+            self._refresh_workflows()
+        except Exception as exc:
+            messagebox.showerror("Create routine", str(exc), parent=self.workflow_window)
 
     def _close_workflow_manager(self) -> None:
         if self.workflow_window is not None and self.workflow_window.winfo_exists():
