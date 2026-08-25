@@ -9,33 +9,44 @@ echo ================================================
 echo.
 
 echo Checking for Python 3.11 or newer...
-py -3.11 -c "import sys; assert sys.version_info >= (3,11), sys.version; print(sys.version)"
+set "PYTHON="
+for /f "delims=" %%P in ('where python 2^>nul') do if not defined PYTHON set "PYTHON=%%P"
+if not defined PYTHON for /f "delims=" %%P in ('where python3 2^>nul') do if not defined PYTHON set "PYTHON=%%P"
+if not defined PYTHON for /f "delims=" %%P in ('where py 2^>nul') do if not defined PYTHON set "PYTHON=%%P"
+
+if not defined PYTHON (
+    echo.
+    echo ERROR: No Python executable was found on PATH.
+    echo Install Python 3.11 or newer from https://www.python.org/downloads/windows/
+    goto :failed
+)
+
+"%PYTHON%" -c "import sys; print('Using Python', sys.version); raise SystemExit(0 if sys.version_info >= (3,11) else 1)"
 if errorlevel 1 (
     echo.
-    echo ERROR: Python 3.11 or newer was not found through the Windows Python launcher.
-    echo Install Python from https://www.python.org/downloads/windows/
-    echo Make sure the Python launcher and pip are enabled, then run this file again.
+    echo ERROR: The detected Python is older than 3.11.
+    echo Install Python 3.11 or newer and run this file again.
     goto :failed
 )
 
 echo.
 echo Upgrading pip...
-py -3.11 -m pip install --upgrade pip
+"%PYTHON%" -m pip install --upgrade pip
 if errorlevel 1 goto :pip_failed
 
 echo.
 echo Installing Mark-31 core, provider, Windows, multimodal, voice, and development packages...
-py -3.11 -m pip install -e ".[providers,windows,multimodal,voice,dev]"
+"%PYTHON%" -m pip install -e ".[providers,windows,multimodal,voice,dev]"
 if errorlevel 1 goto :pip_failed
 
 echo.
 echo Installing Playwright Chromium browser binaries...
-py -3.11 -m playwright install chromium
+"%PYTHON%" -m playwright install chromium
 if errorlevel 1 goto :playwright_failed
 
 echo.
 echo Running a quick Mark-31 import check...
-py -3.11 -c "import main, ui, interactive_browser, desktop_control; print('Mark-31 imports: OK')"
+"%PYTHON%" -c "import main, ui, interactive_browser, desktop_control; print('Mark-31 imports: OK')"
 if errorlevel 1 goto :failed
 
 echo.
