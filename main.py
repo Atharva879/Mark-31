@@ -17,6 +17,7 @@ from llm.openrouter_client import OpenRouterClient
 from llm.local_client import LocalLLMClient
 from llm.router import AllProvidersFailed, LLMRouter
 from knowledge import KnowledgeStore
+from plugins import PluginCatalog
 from llm.schemas import RiskTier, ToolSpec
 from memory.long_term import LongTermMemory
 from skills.apps import AppConfig, ApplicationController
@@ -77,6 +78,7 @@ def build_runtime(
         Path(os.environ.get("JARVIS_KNOWLEDGE_DB", "memory/knowledge.db")),
         settings.allowed_roots,
     )
+    plugin_catalog = PluginCatalog(Path(os.environ.get("JARVIS_PLUGIN_DIR", "memory/plugins")))
 
     monitor_web = _build_web_client()
     monitor_files = ScopedFileManager(settings.allowed_roots) if settings.allowed_roots else None
@@ -159,6 +161,7 @@ def build_runtime(
     registry.secret_store = secret_store
     registry.backup_manager = backup_manager
     registry.knowledge_store = knowledge_store
+    registry.plugin_catalog = plugin_catalog
     _register_knowledge_tools(registry, knowledge_store)
     return router, dispatcher, registry
 
