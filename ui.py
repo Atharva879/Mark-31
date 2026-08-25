@@ -99,8 +99,7 @@ class JarvisApp(tk.Tk):
         return messagebox.askyesno("Confirm sensitive action", prompt, parent=self)
 
     def _notify_tool(self, message: str) -> None:
-        if hasattr(self, "activity"):
-            self._write_log("SYSTEM", message, COLORS["orange"])
+        self.events.put(("notification", message))
 
     def _build_styles(self) -> None:
         style = ttk.Style(self)
@@ -160,6 +159,7 @@ class JarvisApp(tk.Tk):
         self.screen_indicator.pack(anchor="e", pady=(3, 0))
         tk.Label(status_cluster, text="●  WEB READY", bg=COLORS["bg"], fg=COLORS["green"], font=("Cascadia Mono", 8)).pack(anchor="e", pady=(3, 0))
         tk.Label(status_cluster, text="●  MEDIA READY" if self.multimodal else "○  MEDIA OFF", bg=COLORS["bg"], fg=COLORS["green"] if self.multimodal else COLORS["muted"], font=("Cascadia Mono", 8)).pack(anchor="e", pady=(3, 0))
+        tk.Label(status_cluster, text="●  AGENTS READY", bg=COLORS["bg"], fg=COLORS["green"], font=("Cascadia Mono", 8)).pack(anchor="e", pady=(3, 0))
         actions = tk.Frame(header, bg=COLORS["bg"])
         actions.grid(row=0, column=2, rowspan=2, sticky="e")
         ttk.Button(actions, text="MEMORY", style="Jarvis.TButton", command=self._open_memory_manager).pack(side="left", padx=(0, 8))
@@ -386,7 +386,9 @@ class JarvisApp(tk.Tk):
         try:
             while True:
                 kind, payload = self.events.get_nowait()
-                if kind == "memory_records":
+                if kind == "notification":
+                    self._write_log("SYSTEM", str(payload), COLORS["orange"])
+                elif kind == "memory_records":
                     self._render_memory_records(payload)
                 elif kind == "memory_status":
                     if hasattr(self, "memory_status_label") and self.memory_status_label.winfo_exists():
