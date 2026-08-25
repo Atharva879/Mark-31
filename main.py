@@ -8,6 +8,7 @@ import logging
 import os
 from pathlib import Path
 
+from agent_orchestrator import MultiAgentCoordinator
 from audit import AuditLogger
 from config import Settings
 from dispatcher import Dispatcher, ToolRegistry
@@ -63,8 +64,47 @@ def build_runtime(
             settings.request_timeout_seconds,
         ),
     }
+    router = LLMRouter(providers, settings)
     dispatcher = Dispatcher(registry, audit, confirm=confirm, notify=notify)
-    return LLMRouter(providers, settings), dispatcher, registry
+    coordinator = MultiAgentCoordinator(
+        router,
+        audit,
+        max_subtasks=int(os.environ.get("JARVIS_MAX_SUBTASKS", "5")),
+        max_workers=int(os.environ.get("JARVIS_MAX_AGENT_WORKERS", "3")),
+        subtask_timeout_seconds=float(os.environ.get("JARVIS_AGENT_TIMEOUT_SECONDS", "45")),
+        max_prompt_chars=int(os.environ.get("JARVIS_AGENT_MAX_PROMPT_CHARS", "4000")),
+        max_result_chars=int(os.environ.get("JARVIS_AGENT_MAX_RESULT_CHARS", "12000")),
+    )
+    registry.register(
+        ToolSpec(
+            name="delegate_subtasks",
+            description="Run bounded read-only subtasks in parallel using approved Jarvis agent roles.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "subtasks": {
+                        "type": "array",
+                        "maxItems": 10,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "task_id": {"type": "string", "maxLength": 80},
+                                "role": {"type": "string", "enum": ["researcher", "memory_analyst", "file_analyst", "synthesizer"]},
+                                "prompt": {"type": "string", "maxLength": 4000},
+                            },
+                            "required": ["role", "prompt"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                "required": ["subtasks"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.MODERATE,
+            handler=lambda subtasks: coordinator.delegate(subtasks, registry.all(), dispatcher),
+        )
+    )
+    return router, dispatcher, registry
 
 
 def _register_core_tools(registry: ToolRegistry, memory: LongTermMemory) -> None:

@@ -33,6 +33,7 @@ The repository currently contains the first vertical slice:
 | Long-term vector memory | Implemented with a local SQLite vector index and offline deterministic embeddings |
 | Memory Management panel | Implemented in the desktop UI for inspect, search, reindex, and confirmed deletion |
 | Local LLM model switching | Implemented in the settings panel with localhost-only provider validation and fallback order |
+| Multi-agent collaboration | Implemented with bounded roles, parallel read-only subtasks, aggregation, and audit events |
 | Scheduler/clipboard integrations | Planned for later milestones |
 | SimilarWeb analytics adapter | Planned for Milestone 10; credential/API boundary must be confirmed |
 
@@ -79,6 +80,8 @@ Long-term memory stores the existing explicit notes and facts in SQLite and main
 The desktop UI now includes a `MEMORY` button that opens the Memory Management panel. It displays durable records, type, tags, similarity score, and per-record vector status; supports semantic or lexical search; allows explicit reindexing; and requires a confirmation dialog before deleting a selected memory. Operations run off the Tkinter event thread so the main HUD remains responsive.
 
 The `API CONFIG` panel now switches the active provider configuration without editing files manually. It includes Gemini and OpenRouter API key fields, Gemini/OpenRouter/local model names, a localhost-only OpenAI-compatible local endpoint, and a fallback order accepting `local`, `gemini`, and `openrouter`. `SAVE + APPLY` validates all fields, persists them to the local `.env`, refreshes the router, and keeps keys masked by default. A local provider can point to Ollama or another compatible server at `127.0.0.1`, `localhost`, or `::1`; remote endpoints are rejected by design.
+
+Jarvis can now delegate up to the configured number of bounded subtasks through the `delegate_subtasks` tool. The approved roles are `researcher`, `memory_analyst`, `file_analyst`, and `synthesizer`. Each role receives only a read-only tool subset, delegated agents cannot delegate recursively or call sensitive tools, and the coordinator enforces worker, prompt, result, and timeout budgets. Results are aggregated with per-subtask status and written to the audit log without storing prompts verbatim. The desktop header shows `AGENTS READY`, and delegated moderate-risk work still uses the normal confirmation path.
 
 The current build includes persistent memory and registers file tools when `JARVIS_ALLOWED_ROOTS` is configured. Application tools are always present but require an allowlist and a Windows host; they fail closed on other operating systems. The first milestone does not require Windows-only dependencies because the application adapter is not executable on the sandbox and file tools remain disabled until roots are configured. Install the Windows extras only when those integrations are being implemented:
 
