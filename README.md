@@ -34,7 +34,7 @@ The repository currently contains the first vertical slice:
 | Memory Management panel | Implemented in the desktop UI for inspect, search, reindex, and confirmed deletion |
 | Local LLM model switching | Implemented in the settings panel with localhost-only provider validation and fallback order |
 | Multi-agent collaboration | Implemented with bounded roles, parallel read-only subtasks, aggregation, and audit events |
-| Scheduler/clipboard integrations | Planned for later milestones |
+| Proactive monitoring and scheduled triggers | Implemented with persistent APScheduler intervals, SQLite run history, safe web/file change detection, pause/resume/run-now/delete controls, and UI notifications |
 | SimilarWeb analytics adapter | Planned for Milestone 10; credential/API boundary must be confirmed |
 
 ## Desktop interface
@@ -79,6 +79,10 @@ Long-term memory stores the existing explicit notes and facts in SQLite and main
 
 The desktop UI now includes a `MEMORY` button that opens the Memory Management panel. It displays durable records, type, tags, similarity score, and per-record vector status; supports semantic or lexical search; allows explicit reindexing; and requires a confirmation dialog before deleting a selected memory. Operations run off the Tkinter event thread so the main HUD remains responsive.
 
+The `MONITORS` button opens the persistent scheduler panel. It supports bounded `web_url` monitors (public HTTP(S) content through the existing SSRF-protected `WebClient`) and `file` monitors (paths under `JARVIS_ALLOWED_ROOTS`). A monitor stores a fingerprint baseline, emits a notification only on a detected change or failure, and records each run in `JARVIS_SCHEDULER_DB`. Intervals are limited to 60 seconds through seven days; APScheduler coalesces missed runs and permits only one active run per trigger. The panel provides create, pause/resume, run-now, refresh, and delete controls, while the dispatcher supplies the normal moderate/sensitive audit and confirmation gates for schedule changes.
+
+Scheduled monitoring is local-process functionality: the desktop application must remain running. Closing Jarvis stops APScheduler cleanly; it does not claim to be an always-on Windows service. Windows Task Scheduler or startup integration can be added later if unattended process startup is explicitly desired. No schedule can silently run shell commands, sandbox code, delete files, submit forms, or send messages; those actions remain behind the normal dispatcher and sensitive confirmation policy.
+
 The `API CONFIG` panel now switches the active provider configuration without editing files manually. It includes Gemini and OpenRouter API key fields, Gemini/OpenRouter/local model names, a localhost-only OpenAI-compatible local endpoint, and a fallback order accepting `local`, `gemini`, and `openrouter`. `SAVE + APPLY` validates all fields, persists them to the local `.env`, refreshes the router, and keeps keys masked by default. A local provider can point to Ollama or another compatible server at `127.0.0.1`, `localhost`, or `::1`; remote endpoints are rejected by design.
 
 Jarvis can now delegate up to the configured number of bounded subtasks through the `delegate_subtasks` tool. The approved roles are `researcher`, `memory_analyst`, `file_analyst`, and `synthesizer`. Each role receives only a read-only tool subset, delegated agents cannot delegate recursively or call sensitive tools, and the coordinator enforces worker, prompt, result, and timeout budgets. Results are aggregated with per-subtask status and written to the audit log without storing prompts verbatim. The desktop header shows `AGENTS READY`, and delegated moderate-risk work still uses the normal confirmation path.
@@ -93,7 +97,7 @@ Real `.env` files, audit logs, memory databases, virtual environments, and cache
 
 ## Configuration
 
-`GEMINI_API_KEY` is used by the primary adapter, and `OPENROUTER_API_KEY` is used by the fallback adapter. `JARVIS_PROVIDER_ORDER` controls the order, defaulting to `gemini,openrouter`. Model names are configurable because free-tier availability can change. Runtime limits protect against large inputs and runaway tool loops.
+`GEMINI_API_KEY` is used by the primary adapter, and `OPENROUTER_API_KEY` is used by the fallback adapter. `JARVIS_PROVIDER_ORDER` controls the order, defaulting to `gemini,openrouter`. Model names are configurable because free-tier availability can change. Runtime limits protect against large inputs and runaway tool loops. Scheduler state is stored at `JARVIS_SCHEDULER_DB` (default `memory/scheduler.db`); `JARVIS_SCHEDULER_MAX_RUN_HISTORY` bounds retained run records, and `JARVIS_SCHEDULER_POLL_SECONDS` is retained as a compatibility setting while APScheduler owns interval timing.
 
 The default CLI writes audit events to `logs/audit.jsonl` and stores explicit memories in `memory/memory.db`. File tools are disabled unless allowed roots are configured. It never permanently deletes files: the sensitive delete operation only moves a file to the operating system Recycle Bin. Application control accepts only configured allowlisted applications and is unavailable outside Windows.
 
@@ -134,9 +138,10 @@ The full implementation roadmap is captured in [`docs/architecture.md`](docs/arc
 5. Discord official bot integration.
 6. WhatsApp Desktop UI Automation through `pywinauto`.
 7. Opt-in screen awareness with visible capture status.
-8. Scheduler, clipboard history, and declarative focus macros.
-9. Web search and confirmation-gated form filling.
-10. SimilarWeb website analytics.
-11. Calendar, draft-only Gmail, and optional local voice I/O.
+8. Proactive monitoring and persistent scheduled triggers.
+9. Clipboard history and declarative focus macros.
+10. Web search and confirmation-gated form filling.
+11. SimilarWeb website analytics.
+12. Calendar, draft-only Gmail, and optional local voice I/O.
 
 Each milestone should be implemented separately, tested with mocks before real actions are enabled, and reviewed for secret leakage and permission bypasses.

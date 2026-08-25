@@ -10,6 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
   "requests>=2.31,<3",
   "python-dotenv>=1.0,<2",
+  "APScheduler>=3.10,<4",
 ]
 
 [project.optional-dependencies]
@@ -48,5 +49,5 @@ line-length = 100
 target-version = "py311"
 
 [tool.setuptools]
-py-modules = ["audit", "config", "dispatcher", "main", "safety", "ui", "ui_config"]
+py-modules = ["audit", "config", "dispatcher", "main", "safety", "scheduler", "ui", "ui_config"]
 packages = ["llm", "skills", "memory"]

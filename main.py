@@ -24,10 +24,12 @@ from skills.code_sandbox import CodeSandbox
 from skills.files import ScopedFileManager
 from skills.messaging_discord import DiscordClient
 from skills.messaging_whatsapp import WhatsAppDesktopClient
+from skills.monitoring import MonitorRegistry
 from skills.mock_tools import echo_status, get_current_time
 from skills.multimodal import MultimodalIngestor
 from skills.shell import SafeCommandExecutor
 from skills.web import WebClient
+from scheduler import BackgroundScheduler, SchedulerStore
 
 
 def build_runtime(
@@ -54,6 +56,16 @@ def build_runtime(
     _register_browser_tools(registry)
     _register_advanced_file_tools(registry, settings)
     _register_code_sandbox_tool(registry)
+
+    monitor_web = _build_web_client()
+    monitor_files = ScopedFileManager(settings.allowed_roots) if settings.allowed_roots else None
+    scheduler = BackgroundScheduler(
+        SchedulerStore(settings.scheduler_db_path),
+        MonitorRegistry(monitor_web, monitor_files),
+        notify=notify,
+        poll_seconds=float(os.environ.get("JARVIS_SCHEDULER_POLL_SECONDS", "1")),
+        max_run_history=int(os.environ.get("JARVIS_SCHEDULER_MAX_RUN_HISTORY", "500")),
+    )
 
     providers = {
         "local": LocalLLMClient(settings.local_model, settings.local_base_url, settings.request_timeout_seconds),
@@ -104,7 +116,91 @@ def build_runtime(
             handler=lambda subtasks: coordinator.delegate(subtasks, registry.all(), dispatcher),
         )
     )
+    _register_scheduler_tools(registry, scheduler)
+    registry.scheduler = scheduler
     return router, dispatcher, registry
+
+
+def _build_web_client() -> WebClient:
+    return WebClient(
+        timeout_seconds=float(os.environ.get("JARVIS_WEB_TIMEOUT_SECONDS", "15")),
+        max_response_bytes=int(os.environ.get("JARVIS_WEB_MAX_RESPONSE_BYTES", "1000000")),
+        max_results=int(os.environ.get("JARVIS_WEB_MAX_RESULTS", "5")),
+        allowed_hosts={item.strip().lower() for item in os.environ.get("JARVIS_WEB_ALLOWED_HOSTS", "").split(",") if item.strip()},
+    )
+
+
+def _register_scheduler_tools(registry: ToolRegistry, scheduler: BackgroundScheduler) -> None:
+    registry.register(
+        ToolSpec(
+            name="create_monitor_trigger",
+            description="Create a persistent bounded reminder, web, or local-file monitor; the trigger is initially enabled by default.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "maxLength": 120},
+                    "kind": {"type": "string", "enum": ["web_url", "file", "reminder"]},
+                    "interval_seconds": {"type": "integer", "minimum": 60, "maximum": 604800},
+                    "payload": {"type": "object"},
+                    "enabled": {"type": "boolean"},
+                },
+                "required": ["name", "kind", "interval_seconds", "payload"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.MODERATE,
+            handler=lambda name, kind, interval_seconds, payload, enabled=True: scheduler.create_trigger(name, kind, interval_seconds, payload, enabled),
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="list_monitor_triggers",
+            description="List persistent monitoring triggers and their enabled state.",
+            parameters={"type": "object", "properties": {}, "additionalProperties": False},
+            risk=RiskTier.SAFE,
+            handler=scheduler.list,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="monitor_status",
+            description="Return scheduler lifecycle status and recent monitor runs.",
+            parameters={"type": "object", "properties": {}, "additionalProperties": False},
+            risk=RiskTier.SAFE,
+            handler=scheduler.status,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="set_monitor_enabled",
+            description="Enable or disable a persistent monitoring trigger.",
+            parameters={
+                "type": "object",
+                "properties": {"trigger_id": {"type": "string", "maxLength": 80}, "enabled": {"type": "boolean"}},
+                "required": ["trigger_id", "enabled"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.MODERATE,
+            handler=scheduler.set_enabled,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="run_monitor_now",
+            description="Run one configured monitor immediately without changing local or external state.",
+            parameters={"type": "object", "properties": {"trigger_id": {"type": "string", "maxLength": 80}}, "required": ["trigger_id"], "additionalProperties": False},
+            risk=RiskTier.MODERATE,
+            handler=scheduler.run_once,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="delete_monitor_trigger",
+            description="Delete a persistent monitoring trigger and retain its historical run records.",
+            parameters={"type": "object", "properties": {"trigger_id": {"type": "string", "maxLength": 80}}, "required": ["trigger_id"], "additionalProperties": False},
+            risk=RiskTier.SENSITIVE,
+            handler=lambda trigger_id: {"deleted": scheduler.delete(trigger_id), "trigger_id": trigger_id},
+        )
+    )
 
 
 def _register_core_tools(registry: ToolRegistry, memory: LongTermMemory) -> None:
