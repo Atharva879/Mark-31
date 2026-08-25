@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from datetime import UTC, datetime
@@ -28,7 +29,14 @@ class AuditLogger:
 
 def _sanitize(value: Any) -> Any:
     if isinstance(value, Mapping):
-        return {str(key): _sanitize(item) for key, item in value.items()}
+        sanitized: dict[str, Any] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            if key_text.lower() in {"code", "source", "script"} and isinstance(item, str):
+                sanitized[key_text] = f"[SHA256:{hashlib.sha256(item.encode('utf-8')).hexdigest()}]"
+            else:
+                sanitized[key_text] = _sanitize(item)
+        return sanitized
     if isinstance(value, (list, tuple)):
         return [_sanitize(item) for item in value]
     if isinstance(value, str):

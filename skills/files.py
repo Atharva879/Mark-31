@@ -7,8 +7,11 @@ implemented as a Recycle Bin move only and is intended to remain SENSITIVE.
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import os
 import shutil
+import tarfile
+import zipfile
 from pathlib import Path
 from typing import Iterable
 
@@ -39,6 +42,66 @@ class ScopedFileManager:
             for item in folder.iterdir()
             if item.is_file() and fnmatch.fnmatch(item.name, pattern)
         )
+
+    def find_files(self, query: str = "*", directory: str | Path = ".", max_results: int = 100) -> list[str]:
+        """Recursively find files by a bounded glob pattern under the configured roots."""
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("File search pattern cannot be empty")
+        if max_results <= 0 or max_results > 1_000:
+            raise ValueError("File search result limit must be between 1 and 1,000")
+        folder = self.resolve(directory)
+        if not folder.is_dir():
+            raise NotADirectoryError(str(folder))
+        return [str(item) for item in sorted(folder.rglob(query)) if item.is_file()][:max_results]
+
+    def metadata(self, path: str | Path) -> dict[str, object]:
+        target = self.resolve(path)
+        if not target.exists():
+            raise FileNotFoundError(str(target))
+        stat = target.stat()
+        return {
+            "path": str(target),
+            "name": target.name,
+            "suffix": target.suffix.lower(),
+            "is_file": target.is_file(),
+            "is_directory": target.is_dir(),
+            "size_bytes": stat.st_size,
+            "modified_epoch": stat.st_mtime,
+        }
+
+    def sha256(self, path: str | Path, max_bytes: int = 100_000_000) -> str:
+        target = self.resolve(path)
+        if not target.is_file():
+            raise FileNotFoundError(str(target))
+        if target.stat().st_size > max_bytes:
+            raise ValueError("File exceeds the configured hashing limit")
+        digest = hashlib.sha256()
+        with target.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def inspect_archive(self, path: str | Path, max_entries: int = 200) -> dict[str, object]:
+        """List archive members without extracting or executing archive contents."""
+        target = self.resolve(path)
+        if not target.is_file():
+            raise FileNotFoundError(str(target))
+        if max_entries <= 0 or max_entries > 2_000:
+            raise ValueError("Archive entry limit must be between 1 and 2,000")
+        suffix = target.suffix.lower()
+        if suffix == ".zip":
+            with zipfile.ZipFile(target) as archive:
+                members = archive.infolist()[:max_entries]
+                entries = [{"name": item.filename, "size_bytes": item.file_size, "unsafe_path": _unsafe_member(item.filename)} for item in members]
+                total = len(archive.infolist())
+        elif suffix in {".tar", ".gz", ".tgz", ".bz2", ".xz"}:
+            with tarfile.open(target) as archive:
+                members = archive.getmembers()[:max_entries]
+                entries = [{"name": item.name, "size_bytes": item.size, "unsafe_path": _unsafe_member(item.name)} for item in members]
+                total = len(archive.getmembers())
+        else:
+            raise ValueError("Only ZIP and TAR-family archives are supported")
+        return {"path": str(target), "entries": entries, "entry_count": total, "truncated": total > max_entries}
 
     def read_text(self, path: str | Path) -> str:
         target = self.resolve(path)
@@ -83,6 +146,11 @@ class ScopedFileManager:
             raise RuntimeError("send2trash is required for recycle-bin deletion") from exc
         send2trash(str(target))
         return str(target)
+
+
+def _unsafe_member(name: str) -> bool:
+    normalized = name.replace("\\", "/")
+    return normalized.startswith("/") or any(part == ".." for part in normalized.split("/"))
 
 
 def _is_within(candidate: Path, root: Path) -> bool:

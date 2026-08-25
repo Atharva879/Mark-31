@@ -29,6 +29,7 @@ The repository currently contains the first vertical slice:
 | Web search and real-time retrieval | Implemented with bounded DuckDuckGo search and safe public URL fetching |
 | Image and document analysis | Implemented with scoped local ingestion and Gemini vision/text analysis |
 | Agent shell and browser tools | Implemented with shell allowlists, confirmations, limits, and read-only web navigation |
+| Advanced file management and code sandbox | Implemented with scoped search, metadata, hashing, archive inspection, and isolated pure-Python runs |
 | Scheduler/clipboard integrations | Planned for later milestones |
 | SimilarWeb analytics adapter | Planned for Milestone 10; credential/API boundary must be confirmed |
 
@@ -67,6 +68,8 @@ Web capabilities are available in Chat Mode and through the ordinary tool loop. 
 Multimodal analysis is available for files under `JARVIS_ALLOWED_ROOTS`. In Chat Mode, use `/image <path> | <question>` for PNG/JPEG/WebP/BMP/GIF image analysis or `/document <path> | <question>` for TXT/Markdown/CSV/JSON/XML/HTML/PDF/DOCX analysis. Images are validated and normalized to in-memory PNG bytes; documents are extracted locally, bounded, and then sent through provider-isolated Gemini vision or the normal provider failover path. The application does not execute document scripts or write uploaded copies to a separate staging directory.
 
 Agent tool-calling now includes `run_shell_command` and `browse_web_page`. Shell execution accepts only configured executable names, never invokes a command shell, applies working-directory, argument, timeout, and output limits, and is classified as `SENSITIVE`, so the existing confirmation callback must approve every execution. Browser navigation is read-only and reuses the web safety boundary: no scripts, form submissions, downloads, or arbitrary interactive browser control. Use Chat Mode for natural-language tool selection, or use the explicit `/search` and `/fetch` commands for direct web retrieval.
+
+Advanced file tools include `find_files`, `file_metadata`, `hash_file_sha256`, and `inspect_archive`. They remain rooted at `JARVIS_ALLOWED_ROOTS`; archive inspection only lists members and flags traversal-style names without extraction. `run_python_sandbox` executes small pure-Python calculations in a short-lived isolated subprocess, with AST restrictions, no imports or file/network APIs, a timeout, output cap, temporary working directory, and a POSIX memory/file-size limit. Sandbox execution is `SENSITIVE` and requires confirmation. Sandbox source is fingerprinted rather than written verbatim to audit logs.
 
 The current build includes persistent memory and registers file tools when `JARVIS_ALLOWED_ROOTS` is configured. Application tools are always present but require an allowlist and a Windows host; they fail closed on other operating systems. The first milestone does not require Windows-only dependencies because the application adapter is not executable on the sandbox and file tools remain disabled until roots are configured. Install the Windows extras only when those integrations are being implemented:
 
