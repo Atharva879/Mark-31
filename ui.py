@@ -20,11 +20,12 @@ from tkinter.scrolledtext import ScrolledText
 
 from config import Settings
 from conversation import ConversationStore
-from llm.schemas import ChatMessage
+from llm.schemas import ChatMessage, RiskTier, ToolSpec
 from main import build_runtime
 from notifications import NativeToastBackend, NotificationCenter
 from permissions import PermissionStore
 from desktop_control import DesktopController
+from interactive_browser import InteractiveBrowser
 from tray import TrayController
 from skills.camera import CameraCapture
 from skills.screen import ScreenCapture
@@ -108,6 +109,10 @@ class JarvisApp(tk.Tk):
         )
         self.memory = LongTermMemory(self.settings.memory_db_path, self.settings.vector_db_path)
         self.router, self.dispatcher, self.registry = self._build_runtime()
+        self.interactive_browser = InteractiveBrowser(
+            execute_check=lambda: bool(self.desktop.status()["execute_enabled"])
+        )
+        self._register_interactive_browser_tools()
         self.scheduler = self.registry.scheduler
         self.workflow_engine = self.registry.workflow_engine
         self.screen = ScreenCapture(
@@ -185,6 +190,56 @@ class JarvisApp(tk.Tk):
         self.after(100, self._drain_events)
         self.after(10_000, self._presence_tick)
         self.after(10_000, self._visual_tick)
+
+    def _register_interactive_browser_tools(self) -> None:
+        self.registry.register(
+            ToolSpec(
+                name="interactive_browser_navigate",
+                description="Navigate the active Playwright browser to a public HTTP(S) page in Execute mode.",
+                parameters={
+                    "type": "object",
+                    "properties": {"url": {"type": "string", "maxLength": 2000}},
+                    "required": ["url"],
+                    "additionalProperties": False,
+                },
+                risk=RiskTier.SENSITIVE,
+                confirmation_required=True,
+                handler=self.interactive_browser.navigate,
+            )
+        )
+        self.registry.register(
+            ToolSpec(
+                name="interactive_browser_click",
+                description="Click a CSS selector in the active Playwright browser.",
+                parameters={
+                    "type": "object",
+                    "properties": {"selector": {"type": "string", "maxLength": 300}},
+                    "required": ["selector"],
+                    "additionalProperties": False,
+                },
+                risk=RiskTier.SENSITIVE,
+                confirmation_required=True,
+                handler=self.interactive_browser.click,
+            )
+        )
+        self.registry.register(
+            ToolSpec(
+                name="interactive_browser_fill",
+                description="Fill a non-secret browser field in the active Playwright browser.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "selector": {"type": "string", "maxLength": 300},
+                        "text": {"type": "string", "maxLength": 2000},
+                    },
+                    "required": ["selector", "text"],
+                    "additionalProperties": False,
+                },
+                risk=RiskTier.SENSITIVE,
+                confirmation_required=True,
+                handler=self.interactive_browser.fill,
+            )
+        )
 
     def _build_runtime(self):
         return build_runtime(
