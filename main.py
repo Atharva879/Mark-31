@@ -17,11 +17,13 @@ from llm.router import AllProvidersFailed, LLMRouter
 from llm.schemas import RiskTier, ToolSpec
 from memory.store import MemoryStore
 from skills.apps import AppConfig, ApplicationController
+from skills.browser import ReadOnlyBrowser
 from skills.files import ScopedFileManager
 from skills.messaging_discord import DiscordClient
 from skills.messaging_whatsapp import WhatsAppDesktopClient
 from skills.mock_tools import echo_status, get_current_time
 from skills.multimodal import MultimodalIngestor
+from skills.shell import SafeCommandExecutor
 from skills.web import WebClient
 
 
@@ -41,6 +43,8 @@ def build_runtime(settings: Settings | None = None) -> tuple[LLMRouter, Dispatch
     _register_whatsapp_tools(registry)
     _register_web_tools(registry)
     _register_multimodal_tools(registry, settings)
+    _register_shell_tools(registry, settings)
+    _register_browser_tools(registry)
 
     providers = {
         "gemini": GeminiClient(settings.gemini_api_key, settings.gemini_model, settings.request_timeout_seconds),
@@ -234,6 +238,64 @@ def _register_discord_tools(registry: ToolRegistry) -> None:
             },
             risk=RiskTier.MODERATE,
             handler=client.send_message,
+        )
+    )
+
+
+def _register_shell_tools(registry: ToolRegistry, settings: Settings) -> None:
+    allowlist = {
+        item.strip().lower()
+        for item in os.environ.get("JARVIS_SHELL_ALLOWLIST", "echo,whoami,where,ipconfig,git").split(",")
+        if item.strip()
+    }
+    executor = SafeCommandExecutor(
+        allowlist,
+        settings.allowed_roots,
+        timeout_seconds=float(os.environ.get("JARVIS_SHELL_TIMEOUT_SECONDS", "15")),
+        max_output_chars=int(os.environ.get("JARVIS_SHELL_MAX_OUTPUT_CHARS", "12000")),
+    )
+    registry.register(
+        ToolSpec(
+            name="run_shell_command",
+            description="Run one explicitly allowlisted local command without shell interpretation; confirmation is always required.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "maxLength": 2_000},
+                    "working_directory": {"type": "string", "maxLength": 2_000},
+                },
+                "required": ["command"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.SENSITIVE,
+            handler=lambda command, working_directory=None: executor.execute(command, working_directory),
+        )
+    )
+
+
+def _register_browser_tools(registry: ToolRegistry) -> None:
+    client = WebClient(
+        timeout_seconds=float(os.environ.get("JARVIS_WEB_TIMEOUT_SECONDS", "15")),
+        max_response_bytes=int(os.environ.get("JARVIS_WEB_MAX_RESPONSE_BYTES", "1000000")),
+        max_results=int(os.environ.get("JARVIS_WEB_MAX_RESULTS", "5")),
+        allowed_hosts={item.strip().lower() for item in os.environ.get("JARVIS_WEB_ALLOWED_HOSTS", "").split(",") if item.strip()},
+    )
+    browser = ReadOnlyBrowser(client)
+    registry.register(
+        ToolSpec(
+            name="browse_web_page",
+            description="Read a public web page in read-only mode; never submit forms, execute scripts, or download files.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "maxLength": 2_000},
+                    "max_chars": {"type": "integer", "minimum": 1, "maximum": 100_000},
+                },
+                "required": ["url"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.SAFE,
+            handler=lambda url, max_chars=12_000: browser.navigate(url, max_chars),
         )
     )
 
