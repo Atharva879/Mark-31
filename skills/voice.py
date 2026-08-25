@@ -1,28 +1,26 @@
-"""Optional local voice input and speech output adapters.
+"""In-memory Gemini voice input and output for the Jarvis desktop agent.
 
-Voice input is bounded to a single push-to-talk capture. Speech output runs in a
-worker thread and can be interrupted. No audio is uploaded by these adapters.
+Microphone captures are bounded and held as bytes only. Production voice requires
+Gemini credentials; injected recorder/transcriber/engine objects are retained for
+unit tests and deterministic integrations without introducing local model fallbacks.
 """
 
 from __future__ import annotations
 
 import base64
-import os
-import tempfile
 import threading
-from pathlib import Path
+from typing import Any, Callable
 
 import requests
-from typing import Callable, Any
 
 
 class VoiceInput:
     def __init__(
         self,
-        model_size: str = "base",
+        model_size: str = "base",  # retained for backwards-compatible callers; never loads a model
         max_seconds: float = 10.0,
         sample_rate: int = 16_000,
-        transcriber: Callable[[Path], str] | None = None,
+        transcriber: Callable[[bytes], str] | None = None,
         recorder: Callable[[float, int], bytes] | None = None,
         gemini_api_key: str = "",
         gemini_model: str = "gemini-3.7-flash",
@@ -38,44 +36,44 @@ class VoiceInput:
         self.gemini_api_key = gemini_api_key.strip()
         self.gemini_model = gemini_model.strip() or "gemini-3.7-flash"
         self.audio_transcriber = audio_transcriber
-        self._model: Any = None
+
+    def configure_gemini(self, api_key: str, model: str | None = None) -> None:
+        self.gemini_api_key = api_key.strip()
+        if model:
+            self.gemini_model = model.strip() or self.gemini_model
 
     def listen_once(self) -> str:
-        """Record one bounded utterance and return normalized text."""
+        """Capture one bounded utterance and transcribe it without writing audio."""
         if self.audio_transcriber is None and not self.gemini_api_key and self.transcriber is None:
-            raise RuntimeError("Configure a Gemini API key before using voice input")
-        if self.recorder is not None:
-            audio_bytes = self.recorder(self.max_seconds, self.sample_rate)
-            if not isinstance(audio_bytes, bytes) or not audio_bytes:
-                raise RuntimeError("Voice recorder returned no audio")
+            raise RuntimeError("Gemini Voice requires a valid Gemini API key and model")
+        audio_bytes = (
+            self.recorder(self.max_seconds, self.sample_rate)
+            if self.recorder
+            else self._record_wav()
+        )
+        if not isinstance(audio_bytes, bytes) or not audio_bytes:
+            raise RuntimeError("Voice recorder returned no audio")
+        if self.audio_transcriber is not None:
+            text = self.audio_transcriber(audio_bytes, "audio/wav")
+        elif self.gemini_api_key:
+            text = self._transcribe_gemini(audio_bytes)
         else:
-            audio_bytes = self._record_wav()
-
-        path: Path | None = None
-        try:
-            if self.audio_transcriber is not None or self.gemini_api_key:
-                text = self._transcribe(None, audio_bytes)
-            else:
-                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as handle:
-                    path = Path(handle.name)
-                    handle.write(audio_bytes)
-                text = self._transcribe(path, audio_bytes)
-            return " ".join(text.split())
-        finally:
-            if path is not None:
-                try:
-                    path.unlink(missing_ok=True)
-                except OSError:
-                    pass
+            # Dependency injection only: production has no local transcription fallback.
+            text = self.transcriber(audio_bytes)
+        normalized = " ".join(str(text).split())
+        if not normalized:
+            raise RuntimeError("Voice transcription returned no spoken words")
+        return normalized
 
     def _record_wav(self) -> bytes:
         try:
+            import io
             import sounddevice as sd
             import soundfile as sf
         except ImportError as exc:
-            raise RuntimeError("Install the voice extras for microphone capture") from exc
-        import io
-
+            raise RuntimeError(
+                "Install sounddevice and soundfile for Gemini microphone capture"
+            ) from exc
         recording = sd.rec(
             int(self.max_seconds * self.sample_rate),
             samplerate=self.sample_rate,
@@ -86,24 +84,6 @@ class VoiceInput:
         buffer = io.BytesIO()
         sf.write(buffer, recording, self.sample_rate, format="WAV")
         return buffer.getvalue()
-
-    def _transcribe(self, path: Path | None, audio_bytes: bytes) -> str:
-        if self.audio_transcriber is not None:
-            return self.audio_transcriber(audio_bytes, "audio/wav")
-        if self.gemini_api_key:
-            return self._transcribe_gemini(audio_bytes)
-        if self.transcriber is not None:
-            return self.transcriber(path)
-        if self._model is None:
-            try:
-                from faster_whisper import WhisperModel
-            except ImportError as exc:
-                raise RuntimeError("Install the voice extras for local transcription") from exc
-            device = os.environ.get("JARVIS_WHISPER_DEVICE", "cpu")
-            compute_type = os.environ.get("JARVIS_WHISPER_COMPUTE_TYPE", "int8")
-            self._model = WhisperModel(self.model_size, device=device, compute_type=compute_type)
-        segments, _info = self._model.transcribe(str(path), beam_size=1, vad_filter=True)
-        return " ".join(segment.text.strip() for segment in segments).strip()
 
     def _transcribe_gemini(self, audio_bytes: bytes) -> str:
         body = {
@@ -144,7 +124,7 @@ class SpeechSynthesizer:
     def __init__(
         self,
         rate: int = 175,
-        engine: Any | None = None,
+        engine: Any | None = None,  # test/integration injection only
         gemini_api_key: str = "",
         gemini_model: str = "gemini-3.1-flash-tts-preview",
     ) -> None:
@@ -160,6 +140,11 @@ class SpeechSynthesizer:
     def speaking(self) -> bool:
         return self._speaking
 
+    def configure_gemini(self, api_key: str, model: str | None = None) -> None:
+        self.gemini_api_key = api_key.strip()
+        if model:
+            self.gemini_model = model.strip() or self.gemini_model
+
     def speak_async(self, text: str, on_done: Callable[[], None] | None = None) -> None:
         text = " ".join(text.split())
         if not text:
@@ -171,10 +156,12 @@ class SpeechSynthesizer:
             try:
                 if self.gemini_api_key:
                     self._speak_gemini(text)
+                elif self._engine is not None:
+                    # Dependency injection only: no local TTS engine is created by production.
+                    self._engine.say(text)
+                    self._engine.runAndWait()
                 else:
-                    engine = self._get_engine()
-                    engine.say(text)
-                    engine.runAndWait()
+                    raise RuntimeError("Gemini Voice requires a valid Gemini API key and model")
             finally:
                 self._speaking = False
                 if on_done is not None:
@@ -204,11 +191,10 @@ class SpeechSynthesizer:
         if not audio:
             raise RuntimeError("Gemini text-to-speech returned no audio")
         try:
+            import numpy as np
             import sounddevice as sd
         except ImportError as exc:
-            raise RuntimeError("Install sounddevice to play Gemini audio") from exc
-        import numpy as np
-
+            raise RuntimeError("Install numpy and sounddevice to play Gemini audio") from exc
         pcm = np.frombuffer(base64.b64decode(audio), dtype=np.int16)
         sd.play(pcm, samplerate=24_000, blocking=True)
 
@@ -216,17 +202,13 @@ class SpeechSynthesizer:
         with self._lock:
             if self._engine is not None and hasattr(self._engine, "stop"):
                 self._engine.stop()
-            self._speaking = False
-
-    def _get_engine(self) -> Any:
-        if self._engine is None:
             try:
-                import pyttsx3
-            except ImportError as exc:
-                raise RuntimeError("Install the voice extras for speech synthesis") from exc
-            self._engine = pyttsx3.init()
-            self._engine.setProperty("rate", self.rate)
-        return self._engine
+                import sounddevice as sd
+
+                sd.stop()
+            except ImportError:
+                pass
+            self._speaking = False
 
 
 __all__ = ["SpeechSynthesizer", "VoiceInput"]

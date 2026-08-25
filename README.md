@@ -25,14 +25,13 @@ The repository currently contains the first vertical slice:
 | Discord messaging | Implemented as an optional allowlisted moderate-risk tool |
 | WhatsApp Desktop messaging | Implemented as an optional dry-run-first UI Automation tool |
 | Screen awareness | Implemented as opt-in, visible, time-limited Gemini vision support |
-| Voice input and speech synthesis | Implemented as optional local push-to-talk voice support |
+| Voice input and speech synthesis | Implemented with bounded in-memory Gemini STT/TTS; no local audio or model fallback |
 | Web search and real-time retrieval | Implemented with bounded DuckDuckGo search and safe public URL fetching |
 | Image and document analysis | Implemented with scoped local ingestion and Gemini vision/text analysis |
 | Agent shell and browser tools | Implemented with shell allowlists, confirmations, limits, and read-only web navigation |
 | Advanced file management and code sandbox | Implemented with scoped search, metadata, hashing, archive inspection, and isolated pure-Python runs |
 | Long-term vector memory | Implemented with a local SQLite vector index and offline deterministic embeddings |
 | Memory Management panel | Implemented in the desktop UI for inspect, search, reindex, and confirmed deletion |
-| Local LLM model switching | Implemented in the settings panel with localhost-only provider validation and fallback order |
 | Multi-agent collaboration | Implemented with bounded roles, parallel read-only subtasks, aggregation, and audit events |
 | Proactive monitoring and scheduled triggers | Implemented with persistent APScheduler intervals, SQLite run history, safe web/file change detection, pause/resume/run-now/delete controls, and UI notifications |
 | Jarvis Presence | Implemented with one-minute idle eligibility, context-aware local messages, repetition/cooldown limits, optional voice output, and persistent `STAY SILENT` override |
@@ -46,9 +45,9 @@ The repository currently contains the first vertical slice:
 
 ## Desktop interface
 
-Running `python main.py` now opens the Jarvis desktop command center by default. The interface follows the supplied reference direction while keeping rendering clean: a dark HUD-style three-panel layout with restrained cyan accents, left-side system telemetry, a central animated circular visualizer, and a right-side activity feed. The UI presents `LISTENING`, `THINKING`, and `SPEAKING` states, includes an `INTERRUPT` control, uses readable Segoe UI/Cascadia Mono typography, and exposes diagnostics and permission status without requiring a terminal. Direct chat is no longer permanently embedded in the main window.
+Running `python main.py` now opens the Jarvis desktop command center by default. The interface uses a layered, glass-inspired three-surface composition with rounded canvas controls, a depth backdrop, left-side telemetry, a central animated lens, and a right-side activity feed. The UI presents `LISTENING`, `THINKING`, and `SPEAKING` states, includes an `INTERRUPT` control, uses readable Segoe UI/Cascadia Mono typography, and exposes diagnostics and permission status without requiring a terminal. Direct chat is no longer permanently embedded in the main window. On supported Windows 11 builds, the app requests a dark DWM Mica backdrop; Tk itself cannot provide native blur on unsupported systems.
 
-Use the `API CONFIG` button in the top-right panel to paste Gemini and OpenRouter keys directly into the application. The fields are masked by default, can be revealed temporarily, and save locally to `.env`; key values are not placed into chat history or audit records. `SAVE + APPLY` rebuilds the provider runtime without requiring a restart. The `PROVIDER ORDER` field controls failover order. Use `ENABLE CHAT MODE` beneath the HUD to open a separate chat window; `DISABLE CHAT MODE` closes it and returns the main window to activity-only mode.
+Use the `API CONFIG` button in the top-right panel to paste Gemini and OpenRouter keys directly into the application. The fields are masked by default, can be revealed temporarily, and save locally to `.env`; key values are not placed into chat history or audit records. `SAVE + APPLY` rebuilds the provider runtime without requiring a restart. The `FALLBACK ORDER` field controls Gemini/OpenRouter failover order. Use `ENABLE CHAT MODE` beneath the HUD to open a separate chat window; `DISABLE CHAT MODE` closes it and returns the main window to activity-only mode.
 
 The terminal mode remains available for diagnostics and automation-friendly use:
 
@@ -72,7 +71,7 @@ WhatsApp Desktop automation is disabled by default. Set `WHATSAPP_ENABLED=true` 
 
 Screen awareness is controlled by the `ENABLE SCREEN` button in the desktop UI. It is off by default, shows a red active indicator when enabled, and automatically expires after `JARVIS_SCREEN_TIMEOUT_SECONDS`. In Chat Mode, use `/screen <question>` to send one in-memory screenshot to Gemini vision. Screenshots are not written to disk by this milestone.
 
-Voice input is activated explicitly with `START VOICE`. Each press records one bounded local utterance, transcribes it with `faster-whisper`, sends the resulting text through the same dispatcher and safety rules as typed commands, and then reads the response aloud with `pyttsx3`. Use `INTERRUPT` to stop speech output. Audio is not uploaded by the local adapters, and the microphone is not left listening continuously.
+Voice input is activated explicitly with `START VOICE`. Each press records one bounded utterance in memory and sends it to Gemini STT as inline audio; the returned text follows the same dispatcher and safety rules as typed commands, and Gemini TTS reads the response aloud. Use `INTERRUPT` to stop speech output. No microphone audio is written to a local file, and no local speech model or local TTS engine is created by production code.
 
 Web capabilities are available in Chat Mode and through the ordinary tool loop. Use `/search <query>` for bounded public DuckDuckGo results, or `/fetch <https-url>` to retrieve current text or JSON from a public endpoint. The fetcher enforces HTTP(S)-only URLs, blocks private and local network addresses, applies timeouts and response-size limits, rejects binary content types, and returns retrieval timestamps. It does not execute page scripts, follow arbitrary browser actions, or download files.
 

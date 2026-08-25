@@ -34,8 +34,7 @@ multimodal = [
   "pypdf>=5,<7",
 ]
 voice = [
-  "faster-whisper>=1.0,<2",
-  "pyttsx3>=2.90,<3",
+  "numpy>=1.26,<3",
   "sounddevice>=0.4,<1",
   "soundfile>=0.12,<1",
 ]
@@ -53,5 +52,5 @@ line-length = 100
 target-version = "py311"
 
 [tool.setuptools]
-py-modules = ["audit", "backup", "config", "conversation", "dispatcher", "main", "presence", "safety", "scheduler", "jarvis_secrets", "startup", "ui", "ui_config", "visual_presence", "permissions", "desktop_control", "notifications", "tray", "automation_orchestrator", "media_publish"]
+py-modules = ["audit", "backup", "config", "conversation", "dispatcher", "main", "presence", "safety", "scheduler", "jarvis_secrets", "startup", "ui", "ui_config", "native_glass", "visual_presence", "permissions", "desktop_control", "notifications", "tray", "automation_orchestrator", "media_publish"]
 packages = ["llm", "skills", "memory"]

@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 python -m pip install --upgrade pip
-python -m pip install .[windows,multimodal,voice]
+python -m pip install ".[windows,multimodal,voice]"
 python -m playwright install chromium
 python -m pip install pyinstaller
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue build, dist

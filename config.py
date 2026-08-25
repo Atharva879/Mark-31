@@ -18,8 +18,6 @@ class Settings:
 
     gemini_api_key: str = ""
     openrouter_api_key: str = ""
-    local_model: str = ""
-    local_base_url: str = "http://127.0.0.1:11434/v1/chat/completions"
     gemini_model: str = "gemini-3.6-flash"
     openrouter_model: str = "deepseek/deepseek-chat-v3.1"
     provider_order: tuple[str, ...] = ("gemini", "openrouter")
@@ -73,10 +71,6 @@ class Settings:
         return cls(
             gemini_api_key=env.get("GEMINI_API_KEY", "").strip(),
             openrouter_api_key=env.get("OPENROUTER_API_KEY", "").strip(),
-            local_model=env.get("JARVIS_LOCAL_MODEL", "").strip(),
-            local_base_url=env.get(
-                "JARVIS_LOCAL_BASE_URL", "http://127.0.0.1:11434/v1/chat/completions"
-            ).strip(),
             gemini_model=_model_name(gemini_model, "GEMINI_MODEL"),
             openrouter_model=_model_name(openrouter_model, "OPENROUTER_MODEL"),
             provider_order=order,
@@ -106,19 +100,6 @@ def _model_name(value: str, label: str) -> str:
     if not value or len(value) > 200 or not re.fullmatch(r"[A-Za-z0-9._:/-]+", value):
         raise ValueError(f"{label} must be a safe model identifier")
     return value
-
-
-def _local_url(value: str) -> str:
-    from urllib.parse import urlparse
-
-    parsed = urlparse(value.strip())
-    if parsed.scheme != "http" or parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
-        raise ValueError("JARVIS_LOCAL_BASE_URL must be an HTTP localhost endpoint")
-    if not parsed.path.endswith("/chat/completions"):
-        raise ValueError(
-            "JARVIS_LOCAL_BASE_URL must target an OpenAI-compatible chat completions endpoint"
-        )
-    return parsed.geturl()
 
 
 def _positive_float(value: str, label: str) -> float:

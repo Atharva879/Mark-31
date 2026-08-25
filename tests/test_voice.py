@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from skills.voice import SpeechSynthesizer, VoiceInput
 
 
-def test_voice_input_transcribes_one_bounded_local_capture_and_cleans_temp_file():
-    seen: list[Path] = []
+def test_voice_input_transcribes_one_bounded_in_memory_capture():
+    seen: list[bytes] = []
 
-    def transcribe(path: Path) -> str:
-        seen.append(path)
-        assert path.exists()
-        assert path.read_bytes() == b"wav-data"
+    def transcribe(audio: bytes) -> str:
+        seen.append(audio)
+        assert audio == b"wav-data"
         return "  open   my   work apps  "
 
     voice = VoiceInput(
@@ -23,7 +20,7 @@ def test_voice_input_transcribes_one_bounded_local_capture_and_cleans_temp_file(
     )
 
     assert voice.listen_once() == "open my work apps"
-    assert seen and not seen[0].exists()
+    assert seen == [b"wav-data"]
 
 
 def test_voice_input_rejects_invalid_duration():
@@ -66,3 +63,54 @@ def test_speech_synthesizer_stop_calls_engine_stop():
     speech = SpeechSynthesizer(engine=engine)
     speech.stop()
     assert engine.stopped is True
+
+
+def test_gemini_stt_sends_inline_audio_without_files(monkeypatch):
+    calls = []
+
+    class Response:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"candidates": [{"content": {"parts": [{"text": "open calendar"}]}}]}
+
+    def post(url, **kwargs):
+        calls.append((url, kwargs))
+        return Response()
+
+    monkeypatch.setattr("skills.voice.requests.post", post)
+    voice = VoiceInput(gemini_api_key="gemini-key", recorder=lambda *_: b"wav-data")
+
+    assert voice.listen_once() == "open calendar"
+    assert calls[0][1]["json"]["contents"][0]["parts"][1]["inline_data"]["data"]
+    assert not any(Path for Path in [])
+
+
+def test_gemini_tts_plays_decoded_audio_in_memory(monkeypatch):
+    import base64
+    import sys
+    import types
+
+    calls = []
+
+    class Response:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"output_audio": {"data": base64.b64encode(b"pcm-data").decode("ascii")}}
+
+    monkeypatch.setattr("skills.voice.requests.post", lambda *args, **kwargs: Response())
+    fake_numpy = types.SimpleNamespace(int16="int16", frombuffer=lambda data, dtype: (data, dtype))
+    fake_sounddevice = types.SimpleNamespace(
+        play=lambda pcm, samplerate, blocking: calls.append((pcm, samplerate, blocking)),
+        stop=lambda: None,
+    )
+    monkeypatch.setitem(sys.modules, "numpy", fake_numpy)
+    monkeypatch.setitem(sys.modules, "sounddevice", fake_sounddevice)
+
+    speech = SpeechSynthesizer(gemini_api_key="gemini-key")
+    speech._speak_gemini("hello")
+
+    assert calls == [((b"pcm-data", "int16"), 24_000, True)]
