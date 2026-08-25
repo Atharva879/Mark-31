@@ -37,6 +37,7 @@ from scheduler import BackgroundScheduler, SchedulerStore
 from secrets import SecretStore
 from workflows import SafeWorkflowEngine, WorkflowStep, WorkflowStore
 from startup import StartupManager
+from system_controls import SystemController
 
 
 def build_runtime(
@@ -78,6 +79,7 @@ def build_runtime(
         Path(os.environ.get("JARVIS_KNOWLEDGE_DB", "memory/knowledge.db")),
         settings.allowed_roots,
     )
+    system_controller = SystemController(allowed_roots=settings.allowed_roots)
     plugin_catalog = PluginCatalog(Path(os.environ.get("JARVIS_PLUGIN_DIR", "memory/plugins")))
 
     monitor_web = _build_web_client()
@@ -162,7 +164,9 @@ def build_runtime(
     registry.backup_manager = backup_manager
     registry.knowledge_store = knowledge_store
     registry.plugin_catalog = plugin_catalog
+    registry.system_controller = system_controller
     _register_knowledge_tools(registry, knowledge_store)
+    _register_system_tools(registry, system_controller)
     return router, dispatcher, registry
 
 
@@ -284,6 +288,62 @@ def _register_personal_tools(
             handler=store.list_email_drafts,
         )
     )
+
+
+def _register_system_tools(registry: ToolRegistry, controller: SystemController) -> None:
+    definitions = [
+        (
+            "system_screenshot",
+            "Save a screenshot under an allowed root.",
+            {"destination": {"type": "string", "maxLength": 400}},
+            ["destination"],
+            controller.screenshot,
+        ),
+        (
+            "set_wifi",
+            "Turn Wi-Fi on or off.",
+            {"enabled": {"type": "boolean"}},
+            ["enabled"],
+            controller.set_wifi,
+        ),
+        (
+            "set_bluetooth",
+            "Turn Bluetooth on or off.",
+            {"enabled": {"type": "boolean"}},
+            ["enabled"],
+            controller.set_bluetooth,
+        ),
+        (
+            "set_volume",
+            "Set system volume between 0 and 100 percent.",
+            {"percent": {"type": "integer", "minimum": 0, "maximum": 100}},
+            ["percent"],
+            controller.set_volume,
+        ),
+        (
+            "set_brightness",
+            "Set display brightness between 0 and 100 percent.",
+            {"percent": {"type": "integer", "minimum": 0, "maximum": 100}},
+            ["percent"],
+            controller.set_brightness,
+        ),
+    ]
+    for name, description, properties, required, handler in definitions:
+        registry.register(
+            ToolSpec(
+                name=name,
+                description=description,
+                parameters={
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                    "additionalProperties": False,
+                },
+                risk=RiskTier.SENSITIVE,
+                confirmation_required=True,
+                handler=handler,
+            )
+        )
 
 
 def _register_knowledge_tools(registry: ToolRegistry, store: KnowledgeStore) -> None:
