@@ -19,6 +19,24 @@ class VideoAsset:
     mime_type: str
 
 
+PROVIDER_CONFIG = {
+    "youtube": {
+        "url": "https://studio.youtube.com/",
+        "file_selector": "input[type='file']",
+        "title_selector": "input[aria-label*='Title'], input[placeholder*='title' i]",
+        "description_selector": "textarea[aria-label*='Description'], textarea",
+        "publish_selector": "button:has-text('Publish')",
+    },
+    "instagram": {
+        "url": "https://www.instagram.com/",
+        "file_selector": "input[type='file']",
+        "title_selector": "textarea[aria-label*='caption' i], textarea",
+        "description_selector": "textarea[aria-label*='caption' i], textarea",
+        "publish_selector": "button:has-text('Share')",
+    },
+}
+
+
 class MediaPublisher:
     def __init__(self, allowed_roots: list[Path], max_bytes: int = MAX_VIDEO_BYTES) -> None:
         self.allowed_roots = [Path(root).expanduser().resolve() for root in allowed_roots]
@@ -62,6 +80,32 @@ class MediaPublisher:
         if value not in {"youtube", "instagram"}:
             raise ValueError("provider must be youtube or instagram")
         return value
+
+    def browser_prepare(
+        self, provider: str, asset_path: str, title: str, description: str, browser
+    ) -> dict[str, object]:
+        plan = self.prepare(provider, asset_path, title, description)
+        config = PROVIDER_CONFIG[plan["provider"]]
+        browser.navigate(config["url"])
+        browser.upload_file(config["file_selector"], plan["path"])
+        if plan["provider"] == "youtube":
+            browser.fill(config["title_selector"], plan["title"])
+            if plan["description"]:
+                browser.fill(config["description_selector"], plan["description"])
+        else:
+            caption = plan["title"] + ("\n\n" + plan["description"] if plan["description"] else "")
+            browser.fill(config["description_selector"], caption[:2000])
+        return {
+            **plan,
+            "status": "ready_for_review",
+            "publish_selector": config["publish_selector"],
+        }
+
+    def browser_publish(self, provider: str, browser) -> dict[str, object]:
+        provider = self.validate_provider(provider)
+        selector = PROVIDER_CONFIG[provider]["publish_selector"]
+        browser.click(selector)
+        return {"provider": provider, "status": "publish_requested", "confirmation_required": True}
 
     def prepare(
         self, provider: str, asset_path: str, title: str, description: str = ""
