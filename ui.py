@@ -24,6 +24,7 @@ from skills.voice import SpeechSynthesizer, VoiceInput
 from skills.web import WebClient
 from skills.multimodal import MultimodalIngestor
 from memory.long_term import LongTermMemory
+from presence import PresenceEngine, PresenceLimits, PresenceStore
 from ui_config import write_local_env
 
 try:
@@ -84,16 +85,33 @@ class JarvisApp(tk.Tk):
         self.tts = SpeechSynthesizer(rate=int(os.environ.get("JARVIS_TTS_RATE", "175")))
         self.voice_request_active = False
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
+        self.presence = PresenceEngine(
+            PresenceStore(self.settings.presence_db_path),
+            PresenceLimits(
+                idle_seconds=int(os.environ.get("JARVIS_PRESENCE_IDLE_SECONDS", "60")),
+                cooldown_seconds=int(os.environ.get("JARVIS_PRESENCE_COOLDOWN_SECONDS", "600")),
+                hourly_limit=int(os.environ.get("JARVIS_PRESENCE_HOURLY_LIMIT", "2")),
+                daily_limit=int(os.environ.get("JARVIS_PRESENCE_DAILY_LIMIT", "20")),
+            ),
+            audit=self.dispatcher.audit.record,
+        )
+        self.presence.mark_activity()
+        self.presence_voice_enabled = False
+        self._presence_tick_lock = threading.Lock()
+        self._presence_tick_active = False
         self.ui_state = "LISTENING"
         self._animation_tick = 0
         self._build_styles()
         self._build_ui()
+        if self.presence.status()["silent"]:
+            self.presence_button.configure(text="RESUME PRESENCE")
         self._write_log("SYSTEM", "Jarvis desktop interface initialized.", COLORS["green"])
         self._write_log("SYSTEM", "Paste provider keys from API CONFIG to connect.", COLORS["muted"])
         self._animate_hud()
         self._refresh_telemetry()
         self.scheduler.start()
         self.after(100, self._drain_events)
+        self.after(10_000, self._presence_tick)
 
     def _build_runtime(self):
         return build_runtime(self.settings, confirm=self._confirm_sensitive_action, notify=self._notify_tool)
@@ -102,6 +120,8 @@ class JarvisApp(tk.Tk):
         return messagebox.askyesno("Confirm sensitive action", prompt, parent=self)
 
     def _notify_tool(self, message: str) -> None:
+        if hasattr(self, "presence"):
+            self.presence.observe_event("system", message, priority=70)
         self.events.put(("notification", message))
 
     def _build_styles(self) -> None:
@@ -164,6 +184,7 @@ class JarvisApp(tk.Tk):
         tk.Label(status_cluster, text="●  MEDIA READY" if self.multimodal else "○  MEDIA OFF", bg=COLORS["bg"], fg=COLORS["green"] if self.multimodal else COLORS["muted"], font=("Cascadia Mono", 8)).pack(anchor="e", pady=(3, 0))
         tk.Label(status_cluster, text="●  AGENTS READY", bg=COLORS["bg"], fg=COLORS["green"], font=("Cascadia Mono", 8)).pack(anchor="e", pady=(3, 0))
         tk.Label(status_cluster, text="●  SCHEDULES READY", bg=COLORS["bg"], fg=COLORS["green"], font=("Cascadia Mono", 8)).pack(anchor="e", pady=(3, 0))
+        tk.Label(status_cluster, text="●  PRESENCE READY", bg=COLORS["bg"], fg=COLORS["green"], font=("Cascadia Mono", 8)).pack(anchor="e", pady=(3, 0))
         actions = tk.Frame(header, bg=COLORS["bg"])
         actions.grid(row=0, column=2, rowspan=2, sticky="e")
         ttk.Button(actions, text="MONITORS", style="Jarvis.TButton", command=self._open_monitor_manager).pack(side="left", padx=(0, 8))
@@ -247,6 +268,10 @@ class JarvisApp(tk.Tk):
         self.voice_button = ttk.Button(controls, text="START VOICE", style="Jarvis.TButton", command=self._start_voice)
         self.voice_button.pack(side="left", padx=5)
         ttk.Button(controls, text="INTERRUPT", style="Jarvis.TButton", command=self._interrupt).pack(side="left", padx=5)
+        self.presence_button = ttk.Button(controls, text="STAY SILENT", style="Jarvis.TButton", command=self._toggle_presence_silence)
+        self.presence_button.pack(side="left", padx=5)
+        self.presence_voice_button = ttk.Button(controls, text="VOICE PRESENCE OFF", style="Jarvis.TButton", command=self._toggle_presence_voice)
+        self.presence_voice_button.pack(side="left", padx=5)
 
     def _draw_hud(self) -> None:
         self.hud.delete("all")
@@ -313,6 +338,7 @@ class JarvisApp(tk.Tk):
             return
         self.input.delete(0, "end")
         self._write_log("YOU", command, COLORS["cyan"])
+        self.presence.mark_activity()
         self._set_state("THINKING", "ANALYZING REQUEST")
         threading.Thread(target=self._run_command, args=(command,), daemon=True).start()
 
@@ -331,8 +357,10 @@ class JarvisApp(tk.Tk):
                 response = self._analyze_document_command(command[10:].strip())
             else:
                 response = self.router.run_tool_loop(command, self.registry.all(), self.dispatcher)
+            self.presence.mark_activity()
             self.events.put(("response", response or "Action completed."))
         except Exception as exc:
+            self.presence.mark_activity()
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
 
     def _search_web(self, query: str) -> str:
@@ -374,6 +402,46 @@ class JarvisApp(tk.Tk):
         image = base64.b64decode(self.screen.capture_png_base64())
         return provider.analyze_image(image, prompt or "Describe the visible screen and identify any obvious issue.").content
 
+    def _presence_tick(self) -> None:
+        with self._presence_tick_lock:
+            if self._presence_tick_active:
+                self.after(10_000, self._presence_tick)
+                return
+            self._presence_tick_active = True
+        threading.Thread(target=self._presence_worker, daemon=True).start()
+        self.after(10_000, self._presence_tick)
+
+    def _presence_worker(self) -> None:
+        try:
+            scheduler_status = self.scheduler.status()
+            message = self.presence.consider({"scheduler_enabled": bool(scheduler_status.get("enabled"))})
+            if message is not None:
+                self.events.put(("presence_message", message))
+        except Exception as exc:
+            self.events.put(("notification", f"Presence paused safely: {type(exc).__name__}: {exc}"))
+        finally:
+            with self._presence_tick_lock:
+                self._presence_tick_active = False
+
+    def _toggle_presence_silence(self) -> None:
+        silent = not bool(self.presence.status()["silent"])
+        self.presence.set_silent(silent)
+        if silent:
+            self.tts.stop()
+            self.presence_button.configure(text="RESUME PRESENCE")
+            self._write_log("SYSTEM", "Presence is silent. No proactive messages or voice will be emitted.", COLORS["orange"])
+        else:
+            self.presence.mark_activity()
+            self.presence_button.configure(text="STAY SILENT")
+            self._write_log("SYSTEM", "Presence resumed. Jarvis will wait for the one-minute idle threshold.", COLORS["green"])
+
+    def _toggle_presence_voice(self) -> None:
+        self.presence_voice_enabled = not self.presence_voice_enabled
+        self.presence_voice_button.configure(text="VOICE PRESENCE ON" if self.presence_voice_enabled else "VOICE PRESENCE OFF")
+        if not self.presence_voice_enabled:
+            self.tts.stop()
+        self._write_log("SYSTEM", "Proactive voice output enabled." if self.presence_voice_enabled else "Proactive voice output disabled; messages remain in the activity feed.", COLORS["green"] if self.presence_voice_enabled else COLORS["muted"])
+
     def _toggle_screen(self) -> None:
         if self.screen.status().active:
             self.screen.disable("user_toggle")
@@ -393,6 +461,14 @@ class JarvisApp(tk.Tk):
                 kind, payload = self.events.get_nowait()
                 if kind == "notification":
                     self._write_log("SYSTEM", str(payload), COLORS["orange"])
+                elif kind == "presence_message":
+                    if self.presence.status()["silent"]:
+                        continue
+                    message = payload.text if hasattr(payload, "text") else str(payload)
+                    self._write_log("JARVIS", message, COLORS["green"])
+                    if self.presence_voice_enabled:
+                        self._set_state("SPEAKING", "PROACTIVE PRESENCE")
+                        self.tts.speak_async(message, on_done=lambda: self.events.put(("speech_done", "")))
                 elif kind == "monitor_records":
                     self._render_monitor_records(payload)
                 elif kind == "monitor_status":
@@ -410,6 +486,7 @@ class JarvisApp(tk.Tk):
                     if hasattr(self, "memory_status_label") and self.memory_status_label.winfo_exists():
                         self.memory_status_label.configure(text=str(payload), fg=COLORS["red"])
                 elif kind == "response":
+                    self.presence.mark_activity()
                     self._write_log("JARVIS", str(payload), COLORS["green"])
                     if self.voice_request_active:
                         self._set_state("SPEAKING", "VOICE RESPONSE")
@@ -426,6 +503,7 @@ class JarvisApp(tk.Tk):
                     self.voice_button.configure(state="normal", text="START VOICE")
                     self._set_state("LISTENING", "READY FOR COMMAND")
                 else:
+                    self.presence.mark_activity()
                     self.voice_request_active = False
                     self.voice_button.configure(state="normal", text="START VOICE")
                     self._write_log("ERROR", str(payload), COLORS["red"])
@@ -492,6 +570,7 @@ class JarvisApp(tk.Tk):
         self.chat_window = None
 
     def _start_voice(self) -> None:
+        self.presence.mark_activity()
         if self.voice_request_active:
             return
         self.voice_request_active = True

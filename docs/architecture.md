@@ -75,6 +75,14 @@ The scheduler is a local-process subsystem. `SchedulerStore` persists declarativ
 
 Schedule-management tools are registered with the ordinary dispatcher: listing/status are `SAFE`, create/pause/resume/run-now are `MODERATE`, and deletion is `SENSITIVE`. Scheduled monitors never contain arbitrary Python, shell text, browser actions, message destinations, or form submissions. If future scheduled routines invoke state-changing tools, they must create a new dispatcher request and preserve the existing moderate notification or sensitive confirmation gate; a background thread must never auto-approve a sensitive action. The UI reports scheduler readiness and routes worker results through the Tkinter event queue.
 
+### Jarvis Presence
+
+`PresenceEngine` is an output-only layer rather than another agent authority. `PresenceStore` persists enabled/silent state, the last user-activity timestamp, bounded proactive-message history, and bounded event summaries in a separate local SQLite database. The engine becomes eligible after 60 seconds of inactivity, but it chooses no message when the context is empty or limits have been reached. Defaults use a 10-minute ambient cooldown, two ambient messages per hour, 20 per local day, and recent-message fingerprints to avoid repetition.
+
+Presence may read only the current time, recent Jarvis activity labels, bounded scheduler summaries, and local PresenceStore state. It does not capture the screen, listen to the microphone, inspect arbitrary files, call an LLM to manufacture chatter, or invoke a registered tool. Its candidate order prioritizes recent meaningful events, then scheduler awareness, then short local observations. Every emission is persisted before delivery, preventing duplicate output if multiple UI ticks overlap.
+
+The HUD exposes `STAY SILENT` / `RESUME PRESENCE` and optional `VOICE PRESENCE ON/OFF`. Silence is persisted and checked before cooldowns, context, or speech; it therefore overrides both ambient and event-originated Presence output. Text output enters the existing Tkinter event queue, and optional speech uses the already local, user-controlled TTS adapter. Presence does not alter the dispatcher’s confirmation policy and cannot authorize an unattended action.
+
 ## Current implemented slice
 
 The current branch includes a SQLite memory store, a scoped filesystem adapter, and an allowlisted application controller in addition to the original LLM router and dispatcher. Memory operations are explicit: notes and facts are written only through registered tools, recall is bounded, and forgetting a memory is sensitive. File operations require configured roots, enforce size limits, reject binary reads, and expose deletion only as a Recycle Bin move. Application control accepts configured executable paths only and fails closed on non-Windows hosts.
