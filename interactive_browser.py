@@ -1,15 +1,19 @@
 """Playwright-backed browser actions guarded by the desktop Execute session."""
 
 from __future__ import annotations
-
+from pathlib import Path
 from urllib.parse import urlparse
 
 
 class InteractiveBrowser:
-    def __init__(self, browser=None, execute_check=None, max_text: int = 2000) -> None:
+    def __init__(
+        self, browser=None, execute_check=None, max_text: int = 2000, allowed_roots=None
+    ) -> None:
+
         self.browser = browser
         self.execute_check = execute_check or (lambda: False)
         self.max_text = max(100, min(int(max_text), 10_000))
+        self.allowed_roots = [Path(root).expanduser().resolve() for root in (allowed_roots or [])]
         self.page = None
 
     def _ready(self):
@@ -66,6 +70,24 @@ class InteractiveBrowser:
             raise ValueError("browser text is empty or exceeds the configured bound")
         page.locator(selector).fill(text, timeout=10_000)
         return {"action": "fill", "selector": selector, "length": len(text)}
+
+    def upload_file(self, selector: str, path: str) -> dict[str, object]:
+        page = self._ready()
+        selector = self._selector(selector)
+        target = Path(path).expanduser().resolve()
+        if not any(target == root or root in target.parents for root in self.allowed_roots):
+            raise PermissionError("upload path is outside configured allowed roots")
+        if target.suffix.lower() not in {".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}:
+            raise ValueError("unsupported video upload format")
+        if not target.is_file() or target.stat().st_size > 4 * 1024 * 1024 * 1024:
+            raise ValueError("video is missing or exceeds the upload size limit")
+        page.locator(selector).set_input_files(str(target), timeout=10_000)
+        return {
+            "action": "upload_file",
+            "selector": selector,
+            "name": target.name,
+            "size_bytes": target.stat().st_size,
+        }
 
     def press(self, selector: str, key: str) -> dict[str, object]:
         page = self._ready()

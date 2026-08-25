@@ -110,7 +110,8 @@ class JarvisApp(tk.Tk):
         self.memory = LongTermMemory(self.settings.memory_db_path, self.settings.vector_db_path)
         self.router, self.dispatcher, self.registry = self._build_runtime()
         self.interactive_browser = InteractiveBrowser(
-            execute_check=lambda: bool(self.desktop.status()["execute_enabled"])
+            execute_check=lambda: bool(self.desktop.status()["execute_enabled"]),
+            allowed_roots=self.settings.allowed_roots,
         )
         self._register_interactive_browser_tools()
         self.scheduler = self.registry.scheduler
@@ -316,6 +317,69 @@ class JarvisApp(tk.Tk):
                 risk=RiskTier.SENSITIVE,
                 confirmation_required=True,
                 handler=self.interactive_browser.page_state,
+            )
+        )
+
+        self.registry.register(
+            ToolSpec(
+                name="interactive_browser_upload_file",
+                description="Upload an allowed local video file into the active browser page.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "selector": {"type": "string", "maxLength": 300},
+                        "path": {"type": "string", "maxLength": 500},
+                    },
+                    "required": ["selector", "path"],
+                    "additionalProperties": False,
+                },
+                risk=RiskTier.SENSITIVE,
+                confirmation_required=True,
+                handler=self.interactive_browser.upload_file,
+            )
+        )
+
+        self.registry.register(
+            ToolSpec(
+                name="prepare_provider_video_upload",
+                description="Open a YouTube or Instagram upload flow, upload an allowed video, and fill bounded metadata for review.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "provider": {"type": "string", "enum": ["youtube", "instagram"]},
+                        "asset_path": {"type": "string", "maxLength": 500},
+                        "title": {"type": "string", "maxLength": 200},
+                        "description": {"type": "string", "maxLength": 5000},
+                    },
+                    "required": ["provider", "asset_path", "title", "description"],
+                    "additionalProperties": False,
+                },
+                risk=RiskTier.SENSITIVE,
+                confirmation_required=True,
+                handler=lambda provider, asset_path, title, description: (
+                    self.registry.media_publisher.browser_prepare(
+                        provider, asset_path, title, description, self.interactive_browser
+                    )
+                ),
+            )
+        )
+        self.registry.register(
+            ToolSpec(
+                name="publish_provider_video",
+                description="Click the reviewed Publish or Share action for YouTube or Instagram.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "provider": {"type": "string", "enum": ["youtube", "instagram"]}
+                    },
+                    "required": ["provider"],
+                    "additionalProperties": False,
+                },
+                risk=RiskTier.SENSITIVE,
+                confirmation_required=True,
+                handler=lambda provider: self.registry.media_publisher.browser_publish(
+                    provider, self.interactive_browser
+                ),
             )
         )
 
