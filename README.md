@@ -38,6 +38,7 @@ The repository currently contains the first vertical slice:
 | Jarvis Presence | Implemented with one-minute idle eligibility, context-aware local messages, repetition/cooldown limits, optional voice output, and persistent `STAY SILENT` override |
 | Visual Presence | Implemented with explicit screen/camera sessions, bounded frame sampling, visual change detection, optional Gemini analysis, and non-actionable proactive observations |
 | Windows context awareness | Implemented with opt-in active-window and clipboard context, redaction, length limits, and fail-closed non-Windows behavior |
+| Native notifications and tray | Implemented with persistent local ALERTS history and opt-in Windows toast/tray backends |
 | SimilarWeb analytics adapter | Planned for Milestone 10; credential/API boundary must be confirmed |
 
 ## Desktop interface
@@ -91,6 +92,8 @@ Jarvis Presence is an output-only layer that becomes eligible after one minute o
 Visual Presence is separate and disabled by default. `ENABLE SCREEN` and `ENABLE CAMERA` start bounded sessions with visible `SCREEN ACTIVE` or `CAMERA ACTIVE` indicators; both expire automatically. `VISUAL THOUGHTS ON` allows active sources to be sampled, but unchanged frames are not sent for repeated analysis. A manual `/camera <question>` request captures one temporary frame and disables the camera afterward if it was not already active. Frames are kept in memory, are not recorded or written to audit logs, and cloud vision analysis is attempted only through the configured Gemini vision provider. Visual results are broad observations only and cannot execute tools or actions. See [`docs/visual-presence-spec.md`](docs/visual-presence-spec.md) for the privacy contract.
 
 Windows context awareness is also opt-in. `WINDOW CONTEXT ON` can provide the foreground application/window title, and `CLIPBOARD ON` can provide bounded clipboard text after secret-like values are redacted. Each permission is independent and can be revoked immediately. Context is labeled as untrusted data in the model prompt, never causes an action by itself, and fails closed outside Windows.
+
+The `ALERTS` panel stores bounded local notification history, supports marking alerts as read, and remains available even if a native toast backend is unavailable. Set `JARVIS_NATIVE_NOTIFICATIONS=true` to enable Windows toasts and `JARVIS_TRAY_ENABLED=true` to enable the optional tray icon. Both are disabled by default; tray callbacks return to the Tkinter event queue before changing the main window or shutting down.
 
 The `API CONFIG` panel now switches the active provider configuration without editing files manually. It includes Gemini and OpenRouter API key fields, Gemini/OpenRouter/local model names, a localhost-only OpenAI-compatible local endpoint, and a fallback order accepting `local`, `gemini`, and `openrouter`. `SAVE + APPLY` validates all fields, persists them to the local `.env`, refreshes the router, and keeps keys masked by default. A local provider can point to Ollama or another compatible server at `127.0.0.1`, `localhost`, or `::1`; remote endpoints are rejected by design.
 
