@@ -16,6 +16,7 @@ from llm.gemini_client import GeminiClient
 from llm.openrouter_client import OpenRouterClient
 from llm.local_client import LocalLLMClient
 from llm.router import AllProvidersFailed, LLMRouter
+from knowledge import KnowledgeStore
 from llm.schemas import RiskTier, ToolSpec
 from memory.long_term import LongTermMemory
 from skills.apps import AppConfig, ApplicationController
@@ -72,6 +73,10 @@ def build_runtime(
     data_root = Path(os.environ.get("JARVIS_DATA_ROOT", "memory"))
     secret_store = SecretStore(data_root / "secrets.dpapi")
     backup_manager = BackupManager(data_root)
+    knowledge_store = KnowledgeStore(
+        Path(os.environ.get("JARVIS_KNOWLEDGE_DB", "memory/knowledge.db")),
+        settings.allowed_roots,
+    )
 
     monitor_web = _build_web_client()
     monitor_files = ScopedFileManager(settings.allowed_roots) if settings.allowed_roots else None
@@ -153,6 +158,8 @@ def build_runtime(
     registry.startup_manager = startup_manager
     registry.secret_store = secret_store
     registry.backup_manager = backup_manager
+    registry.knowledge_store = knowledge_store
+    _register_knowledge_tools(registry, knowledge_store)
     return router, dispatcher, registry
 
 
@@ -272,6 +279,68 @@ def _register_personal_tools(
             },
             risk=RiskTier.SAFE,
             handler=store.list_email_drafts,
+        )
+    )
+
+
+def _register_knowledge_tools(registry: ToolRegistry, store: KnowledgeStore) -> None:
+    registry.register(
+        ToolSpec(
+            name="import_knowledge_source",
+            description="Explicitly import one supported local text source under an allowed root.",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string", "maxLength": 400}},
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.MODERATE,
+            handler=store.import_source,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="search_knowledge",
+            description="Search explicitly imported local knowledge and return provenance citations.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "maxLength": 200},
+                    "limit": {"type": "integer", "maximum": 25},
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.SAFE,
+            handler=lambda query, limit=10: store.search(query, limit),
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="list_knowledge_sources",
+            description="List explicitly imported local knowledge sources and their checksums.",
+            parameters={
+                "type": "object",
+                "properties": {"limit": {"type": "integer", "maximum": 100}},
+                "additionalProperties": False,
+            },
+            risk=RiskTier.SAFE,
+            handler=lambda limit=100: store.list_sources(limit),
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="delete_knowledge_source",
+            description="Delete one imported knowledge source from the local index.",
+            parameters={
+                "type": "object",
+                "properties": {"source_id": {"type": "string", "maxLength": 80}},
+                "required": ["source_id"],
+                "additionalProperties": False,
+            },
+            risk=RiskTier.SENSITIVE,
+            confirmation_required=True,
+            handler=store.delete,
         )
     )
 
