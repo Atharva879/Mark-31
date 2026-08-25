@@ -241,6 +241,53 @@ class PresenceEngine:
     def observe_event(self, category: str, summary: str, priority: int = 50) -> None:
         self.store.record_event(category, summary, priority, self._now())
 
+    def emit_observation(
+        self, text: str, category: str = "visual", reason: str = "visual_change"
+    ) -> PresenceMessage | None:
+        """Emit one bounded contextual observation through Presence policy."""
+        if not isinstance(text, str) or not text.strip():
+            return None
+        timestamp = self._now()
+        with self._lock:
+            state = self.store.state()
+            if not state["enabled"] or state["silent"]:
+                return None
+            counts = self.store.emission_counts(timestamp)
+            last_emission = counts["last_emission_at"]
+            if (
+                last_emission is not None
+                and timestamp - float(last_emission) < self.limits.cooldown_seconds
+            ):
+                return None
+            if (
+                int(counts["hourly"]) >= self.limits.hourly_limit
+                or int(counts["daily"]) >= self.limits.daily_limit
+            ):
+                return None
+            bounded_text = text.strip()[: self.limits_text_max()]
+            fingerprint = hashlib.sha256(
+                f"{category}:{bounded_text}".encode("utf-8")
+            ).hexdigest()
+            if any(
+                item["fingerprint"] == fingerprint
+                for item in self.store.recent_messages(self.limits.recent_message_window)
+            ):
+                return None
+            message = PresenceMessage(
+                bounded_text, category[:60], reason[:120], fingerprint, timestamp
+            )
+            self.store.record_emission(message)
+            self.audit(
+                "presence_observation_emitted",
+                category=message.category,
+                reason=message.reason,
+                fingerprint=message.fingerprint,
+            )
+            return message
+
+    def limits_text_max(self) -> int:
+        return 1_500
+
     def status(self) -> dict[str, Any]:
         state = self.store.state()
         counts = self.store.emission_counts(self._now())

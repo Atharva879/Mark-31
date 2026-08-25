@@ -24,6 +24,7 @@ windows = [
   "mss>=9,<11",
   "psutil>=5.9,<8",
   "send2trash>=1.8,<2",
+  "opencv-python>=4.8,<5",
 ]
 multimodal = [
   "Pillow>=10,<13",
@@ -49,5 +50,5 @@ line-length = 100
 target-version = "py311"
 
 [tool.setuptools]
-py-modules = ["audit", "config", "dispatcher", "main", "presence", "safety", "scheduler", "ui", "ui_config"]
+py-modules = ["audit", "config", "dispatcher", "main", "presence", "safety", "scheduler", "ui", "ui_config", "visual_presence"]
 packages = ["llm", "skills", "memory"]

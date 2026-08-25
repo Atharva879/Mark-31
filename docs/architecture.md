@@ -83,6 +83,14 @@ Presence may read only the current time, recent Jarvis activity labels, bounded 
 
 The HUD exposes `STAY SILENT` / `RESUME PRESENCE` and optional `VOICE PRESENCE ON/OFF`. Silence is persisted and checked before cooldowns, context, or speech; it therefore overrides both ambient and event-originated Presence output. Text output enters the existing Tkinter event queue, and optional speech uses the already local, user-controlled TTS adapter. Presence does not alter the dispatcher’s confirmation policy and cannot authorize an unattended action.
 
+### Visual Presence
+
+`CameraCapture` and `ScreenCapture` are separate explicit permission controllers. Each has a bounded session timeout, an active indicator, an in-memory PNG boundary, a maximum frame size, and a fail-closed backend check. Camera capture opens a device for a single frame and releases it in `finally`; it does not record video or persist images. The manual `/camera` command creates a temporary explicit camera session when needed and disables it after the bounded analysis.
+
+`VisualObserver` samples only active sources and fingerprints each frame before analysis. Unchanged frames do not reach the vision provider, and changed-frame analysis is cooldown-limited. The observer serializes sampling per source, marks a frame as attempted before provider analysis so repeated failures cannot create a rapid retry loop, and returns only a truncated `VisualThought`. The UI passes that thought to `PresenceEngine.emit_observation`, so silence, cooldowns, daily/hourly limits, repetition protection, and audit metadata still apply.
+
+The visual prompt requests broad, factual, non-sensitive observations and explicitly rejects identity recognition, emotion inference, credential reading, visible-instruction following, and action recommendations. Visual thoughts are output only. They cannot invoke tools, submit forms, send messages, execute code, or bypass sensitive confirmation. Raw frames and raw vision prompts are excluded from audit records; only bounded category, reason, and fingerprint metadata are written.
+
 ## Current implemented slice
 
 The current branch includes a SQLite memory store, a scoped filesystem adapter, and an allowlisted application controller in addition to the original LLM router and dispatcher. Memory operations are explicit: notes and facts are written only through registered tools, recall is bounded, and forgetting a memory is sensitive. File operations require configured roots, enforce size limits, reject binary reads, and expose deletion only as a Recycle Bin move. Application control accepts configured executable paths only and fails closed on non-Windows hosts.
