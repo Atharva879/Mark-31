@@ -21,6 +21,7 @@ PERMISSION_LIMITS = {
     "calendar_read": 24 * 60 * 60,
     "task_write": 60 * 60,
     "email_draft": 60 * 60,
+    "desktop_execute": 5 * 60,
 }
 
 
