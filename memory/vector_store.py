@@ -90,6 +90,10 @@ class SQLiteVectorStore:
                 (int(memory_id), len(vector), packed),
             )
 
+    def contains(self, memory_id: int) -> bool:
+        with self._connect() as connection:
+            return connection.execute("SELECT 1 FROM memory_vectors WHERE memory_id=?", (int(memory_id),)).fetchone() is not None
+
     def delete(self, memory_id: int) -> bool:
         with self._connect() as connection:
             cursor = connection.execute("DELETE FROM memory_vectors WHERE memory_id=?", (int(memory_id),))

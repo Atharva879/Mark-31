@@ -28,7 +28,11 @@ from skills.shell import SafeCommandExecutor
 from skills.web import WebClient
 
 
-def build_runtime(settings: Settings | None = None) -> tuple[LLMRouter, Dispatcher, ToolRegistry]:
+def build_runtime(
+    settings: Settings | None = None,
+    confirm=None,
+    notify=None,
+) -> tuple[LLMRouter, Dispatcher, ToolRegistry]:
     settings = settings or Settings.from_env()
     logging.basicConfig(level=getattr(logging, settings.log_level, logging.INFO))
     audit = AuditLogger(settings.audit_log_path)
@@ -57,7 +61,7 @@ def build_runtime(settings: Settings | None = None) -> tuple[LLMRouter, Dispatch
             settings.request_timeout_seconds,
         ),
     }
-    dispatcher = Dispatcher(registry, audit)
+    dispatcher = Dispatcher(registry, audit, confirm=confirm, notify=notify)
     return LLMRouter(providers, settings), dispatcher, registry
 
 
